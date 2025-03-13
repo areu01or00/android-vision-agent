@@ -13,7 +13,13 @@ This guide shows you how to use the improved Android Vision Agent with its LLM-b
    ```
 5. Run the agent:
    ```
-   python simple_android_vision_agent.py
+   python android_vision_agent.py
+   ```
+   
+   Or use the provided shell script:
+   ```
+   chmod +x run.sh  # Make it executable first time
+   ./run.sh
    ```
 
 ## Task Formats
