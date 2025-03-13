@@ -1,10 +1,10 @@
-# Android AI Agent Examples
+# Android Vision Agent Examples
 
-This directory contains example scripts and use cases for the Android AI Agent.
+This directory contains example scripts and use cases for the Android Vision Agent.
 
 ## Example Tasks
 
-Here are some example tasks you can try with the Android AI Agent:
+Here are some example tasks you can try with the Android Vision Agent:
 
 ### Basic Navigation
 
@@ -41,10 +41,22 @@ Here are some example tasks you can try with the Android AI Agent:
 You can run examples using the main script:
 
 ```bash
-python android_ai_agent.py
+python android_vision_agent.py
+```
+
+Or use the provided shell script:
+```bash
+chmod +x run.sh  # Make it executable first time
+./run.sh
 ```
 
 When prompted, enter one of the example tasks above.
+
+Alternatively, you can use the example script to directly run a task:
+
+```bash
+python examples/run_example.py "open chrome and search for AI news"
+```
 
 ## Creating Your Own Examples
 
