@@ -1,23 +1,22 @@
 # Android Vision Agent
 
-A powerful AI-driven automation tool for Android devices that combines direct actions with XML-based UI analysis for precise control. Now with multi-step planning and cost-efficient operation.
+A powerful AI-driven automation tool for Android devices that uses OpenAI's GPT-4o vision capabilities to analyze screens and perform actions. This agent can automate tasks on Android with natural language instructions.
 
 ## Features
 
-- **Fast Direct Actions**: Instantly launches apps and performs common tasks without screenshots
-- **XML-Based UI Analysis**: Uses UI hierarchy data for precise element targeting without coordinates
-- **Multi-Step Planning**: Plans several steps at once to reduce API calls and improve performance
-- **Cost-Efficient Operation**: Uses gpt-4o-mini and smart caching for lower API costs
-- **Smart Task Planning**: Automatically breaks down complex tasks into executable steps
-- **Element-Based Interaction**: Targets UI elements directly by ID, text or description
-- **Adaptive Execution**: Combines direct commands with UI analysis for optimal performance
+- **Direct OpenAI Integration**: Uses GPT-4o vision API for screen analysis and decision making
+- **Task Planning**: Analyzes tasks and determines if app launching is required
+- **Interactive Mode**: Simple command-line interface for issuing instructions
+- **Screen Recording**: Automatically records sessions for later review
+- **App Discovery**: Can find and launch apps by name
+- **Multiple Action Types**: Supports tapping, typing, scrolling and waiting
 
 ## Requirements
 
 - Python 3.8+
 - Android device with USB debugging enabled
-- OpenAI API key
-- scrcpy installed (optional for screen mirroring)
+- OpenAI API key (GPT-4o access required)
+- scrcpy installed for screen recording
 - adb command-line tools
 
 ## Installation
@@ -46,83 +45,64 @@ A powerful AI-driven automation tool for Android devices that combines direct ac
 
 Run the agent:
 ```
-python android_vision_agent.py
-```
-
-Or use the provided shell script:
-```
-chmod +x run.sh  # Make it executable first time
-./run.sh
+python android_ai_agent.py
 ```
 
 Enter tasks using natural language, for example:
-- "open twitter and search for AI news"
-- "open chrome and search for medicinal properties of marijuana"
-- "open gmail and compose an email to example@gmail.com"
-- "open youtube and search for funny cat videos"
+- "open twitter and scroll through my timeline"
+- "open chrome and search for AI news"
+- "open gmail and compose an email"
+- "open youtube and search for coding tutorials"
+
+### Available Commands
+
+- `screenshot` - Takes a screenshot of the current screen
+- `context` - Analyzes the current screen context
+- `launch [app]` - Launches an app (e.g., `launch chrome`)
+- `exit` or `quit` - Ends the session
+- `help` - Shows available commands
 
 ## How It Works
 
-The Android Vision Agent uses a two-phase approach to execute tasks:
+The Android Vision Agent uses GPT-4o to analyze screenshots and determine actions:
 
-1. **Task Planning Phase**:
-   - A language model (GPT-3.5 Turbo) analyzes the task
-   - Determines if direct app launching is possible
-   - Identifies additional steps needed after app launch
-   - Creates a structured execution plan
+1. **Task Analysis Phase**:
+   - Determines if an app needs to be launched
+   - Identifies the specific app to launch
+   - Plans what to do after the app is launched
 
 2. **Execution Phase**:
-   - **Stage 1**: Direct actions (app launching) when possible
-   - **Stage 2**: XML-based LLM guidance for complex interactions
-   - The LLM analyzes UI hierarchy XML data to:
-     - Plan multiple steps at once for efficiency
-     - Identify UI elements by resourceId, text, or content-description
-     - Target exact elements rather than screen coordinates
-     - Execute interactions with precision
+   - Takes screenshots of the current screen
+   - Sends the screenshot to GPT-4o for analysis
+   - Determines the next action (tap, type, scroll, etc.)
+   - Executes the action using ADB commands
+   - Repeats until the task is complete
 
-## Key Improvements
+## Key Design Principles
 
-- **Multi-Step Planning**: Plans multiple steps at once to reduce API calls and cost
-  - Plans up to 5 actions in a single API call
-  - Handles repetitive actions (like scrolling) with repetition counts
-  - Adaptive verification only when needed
-
-- **XML Preprocessing & Caching**:
-  - Simplifies XML before sending to the LLM for efficient processing
-  - Caches UI state hashes to avoid redundant API calls
-  - Identifies when UI hasn't significantly changed
-
-- **Cost-Efficient Design**:
-  - Uses gpt-4o-mini instead of more expensive models
-  - Reduces token usage with optimized prompts
-  - Only refreshes UI analysis when necessary
-
-- **No More Screenshot Guessing**: Instead of analyzing screenshots and guessing coordinates, the agent now:
-  - Gets the exact UI hierarchy XML representation
-  - Identifies elements by their unique IDs, text, or descriptions
-  - Clicks and interacts with precise UI elements
-  - Handles complex interfaces reliably
+- **Vision-Based UI Analysis**: Uses GPT-4o to "see" and understand the screen
+- **Percentage-Based Coordinates**: Taps use percentages of screen width/height for device independence
+- **Built-in Session Recording**: Automatically records screen sessions for later review
+- **Direct ADB Commands**: Uses ADB directly for reliable device interaction
+- **JSON Communication**: All AI responses use JSON format for consistent parsing
+- **Image Optimization**: Resizes screenshots to reduce API token usage
 
 ## Example Flows
 
 **Simple Task**: "open twitter"
 ```
-1. Task planner identifies this as a direct action
+1. Task planner identifies Twitter app
 2. Agent launches Twitter app directly
 3. Task marked as complete
 ```
 
-**Complex Task**: "open gmail and scroll till you find email from John"
+**Complex Task**: "open twitter and scroll through my timeline"
 ```
-1. Task planner identifies this as a multi-stage task
-2. Stage 1: Direct launch of Gmail app
-3. Stage 2: Multi-step planning:
-   - Plan identifies that this requires multiple scrolls
-   - Plans 5 scrolling actions in a single API call
-   - Executes all 5 scrolls
-   - Checks UI to see if email is found
-   - If not, plans additional steps
-   - Continues until email is found or maximum steps reached
+1. Task planner identifies Twitter app
+2. Agent launches Twitter app
+3. Agent takes screenshots and analyzes screen
+4. Agent scrolls through timeline multiple times
+5. Task continues until completion or max steps reached
 ```
 
 ## Performance Optimization
@@ -131,14 +111,14 @@ For best performance:
 - Use a USB 3.0 connection instead of wireless debugging
 - Keep your device screen on and unlocked 
 - Close unnecessary background apps on your phone
-- Ensure your phone has sufficient storage space available
+- Use a device with good screen resolution
 
 ## Limitations
 
 - Requires physical access to the Android device
 - Some apps may have security measures preventing automation
 - Performance depends on OpenAI API responsiveness
-- Some apps may not expose proper element IDs
+- May struggle with highly dynamic content or complex interfaces
 
 ## Contributing
 
@@ -147,7 +127,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 MIT License - See LICENSE file for details.
-
-## Detailed Documentation
-
-For more detailed usage instructions, see [USAGE.md](USAGE.md).
