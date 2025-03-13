@@ -44,7 +44,13 @@ A powerful AI-driven automation tool for Android devices that combines direct ac
 
 Run the agent:
 ```
-python simple_android_vision_agent.py
+python android_vision_agent.py
+```
+
+Or use the provided shell script:
+```
+chmod +x run.sh  # Make it executable first time
+./run.sh
 ```
 
 Enter tasks using natural language, for example:
