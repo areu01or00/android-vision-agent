@@ -1,46 +1,36 @@
 #!/usr/bin/env python3
 """
-Example script to run the Android AI Agent with a specific task.
+Example script to run the Android Vision Agent with a specific task.
 """
 
 import asyncio
 import sys
 import os
 
-# Add parent directory to path to import the AndroidAIAgent class
+# Add parent directory to path to import the AndroidVisionAgent class
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from android_ai_agent import AndroidAIAgent
+from android_vision_agent import AndroidVisionAgent
 
 async def run_example(task):
-    """Run the Android AI Agent with a specific task."""
-    agent = AndroidAIAgent()
+    """Run the Android Vision Agent with a specific task."""
+    agent = AndroidVisionAgent()
     
     # Connect to the device
     if not await agent.connect_device():
         print("Failed to connect to device")
         return False
         
-    # Initialize the AI agent
-    if not await agent.initialize():
-        print("Failed to initialize AI agent")
-        return False
-        
-    # Start scrcpy
-    try:
-        await agent.start_scrcpy()
-    except Exception as e:
-        print(f"Failed to start scrcpy: {e}")
-        print("Continuing without screen mirroring")
+    # Get device information
+    print(f"Connected to device with screen size: {agent.width}x{agent.height}")
     
     # Execute the task
     try:
-        await agent.execute_task(task)
+        await agent.run_task(task)
     except Exception as e:
         print(f"Error executing task: {e}")
     finally:
         # Clean up
-        agent.stop_scrcpy()
         print("Example completed")
 
 if __name__ == "__main__":
