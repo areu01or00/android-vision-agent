@@ -182,19 +182,66 @@ class AndroidVisionAgent:
     def get_ui_hierarchy_xml(self):
         """Get complete XML representation of current UI."""
         try:
-            # Dump UI hierarchy to device
-            subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/window_dump.xml"], 
-                           capture_output=True, text=True)
+            # Try multiple paths for UI dump to handle different device permissions
+            dump_locations = [
+                "/data/local/tmp/window_dump.xml",  # More reliable for many devices
+                "/sdcard/window_dump.xml",          # Default location
+                "/sdcard/Download/window_dump.xml"  # Alternative location
+            ]
             
-            # Retrieve the file content
-            result = subprocess.run(["adb", "shell", "cat", "/sdcard/window_dump.xml"],
-                                   capture_output=True, text=True)
-            
-            if result.returncode != 0:
-                print(f"Error getting UI hierarchy: {result.stderr}")
-                return None
+            # Try dumping to each location until one works
+            for dump_path in dump_locations:
+                print(f"Trying to dump UI hierarchy to {dump_path}...")
                 
-            return result.stdout
+                # Use direct uiautomator dump command
+                result = subprocess.run(
+                    ["adb", "shell", f"uiautomator dump {dump_path}"], 
+                    capture_output=True, text=True, shell=True
+                )
+                
+                if "ERROR" in result.stdout or "Exception" in result.stdout:
+                    print(f"Error dumping to {dump_path}: {result.stdout}")
+                    continue
+                
+                # Try to read the dumped file
+                cat_result = subprocess.run(
+                    ["adb", "shell", f"cat {dump_path}"],
+                    capture_output=True, text=True
+                )
+                
+                if cat_result.returncode == 0 and len(cat_result.stdout) > 100:
+                    print(f"Successfully retrieved UI hierarchy from {dump_path}")
+                    return cat_result.stdout
+            
+            # If we reach here, try the no-path version as last resort
+            print("Trying default dump location...")
+            subprocess.run(["adb", "shell", "uiautomator dump"], 
+                          capture_output=True, text=True)
+            
+            default_result = subprocess.run(
+                ["adb", "shell", "cat /sdcard/window_dump.xml"],
+                capture_output=True, text=True
+            )
+            
+            if default_result.returncode == 0 and len(default_result.stdout) > 100:
+                print("Successfully retrieved UI hierarchy from default location")
+                return default_result.stdout
+            
+            # If all else fails, try pulling the file and reading it locally
+            print("Trying to pull UI dump file...")
+            subprocess.run(["adb", "pull", "/sdcard/window_dump.xml", "window_dump.xml"], 
+                          capture_output=True, text=True)
+            
+            if os.path.exists("window_dump.xml"):
+                with open("window_dump.xml", "r") as f:
+                    content = f.read()
+                if len(content) > 100:
+                    print("Successfully retrieved UI hierarchy by pulling file")
+                    return content
+            
+            print("All methods to get UI hierarchy failed")
+            return None
+            
         except Exception as e:
             print(f"Error getting UI hierarchy: {e}")
             return None
@@ -547,6 +594,7 @@ class AndroidVisionAgent:
         # First, check if we can directly launch an app
         app_to_launch = self.parse_task(task)
         direct_launch_success = False
+        app_name = "unknown"
         
         if app_to_launch:
             print(f"📱 Stage 1: Launching app directly ({app_to_launch})")
@@ -554,6 +602,7 @@ class AndroidVisionAgent:
                 self.device.app_start(app_to_launch)
                 await asyncio.sleep(2)  # Wait for app to start
                 direct_launch_success = True
+                app_name = app_to_launch.split('.')[-1]
                 print(f"✅ Successfully launched app ({app_to_launch})")
             except Exception as e:
                 print(f"⚠️ Direct app launch failed: {e}")
@@ -596,9 +645,9 @@ class AndroidVisionAgent:
         
         if direct_launch_success:
             context["previous_actions"].append({
-                "description": f"Launched app {app_to_launch.split('.')[-1] if direct_launch_success else 'unknown'}"
+                "description": f"Launched app {app_name}"
             })
-            results.append(f"Launched app {app_to_launch.split('.')[-1] if direct_launch_success else 'unknown'}")
+            results.append(f"Launched app {app_name}")
         
         while steps_taken < max_steps:
             steps_taken += 1
