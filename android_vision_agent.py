@@ -180,65 +180,55 @@ class AndroidVisionAgent:
         return None
 
     def get_ui_hierarchy_xml(self):
-        """Get complete XML representation of current UI."""
+        """Get complete XML representation of current UI using direct API methods."""
         try:
-            # Try multiple paths for UI dump to handle different device permissions
-            dump_locations = [
-                "/data/local/tmp/window_dump.xml",  # More reliable for many devices
-                "/sdcard/window_dump.xml",          # Default location
-                "/sdcard/Download/window_dump.xml"  # Alternative location
-            ]
+            print("Getting UI hierarchy via direct API method...")
             
-            # Try dumping to each location until one works
-            for dump_path in dump_locations:
-                print(f"Trying to dump UI hierarchy to {dump_path}...")
+            # Method 1: Try using the direct dump_hierarchy method
+            try:
+                hierarchy = self.device.dump_hierarchy()
+                if hierarchy and len(hierarchy) > 100:  # Reasonability check
+                    print("Successfully retrieved UI hierarchy using dump_hierarchy()")
+                    return hierarchy
+            except Exception as e1:
+                print(f"Error with dump_hierarchy(): {e1}")
+            
+            # Method 2: Try using the XPath module
+            try:
+                print("Trying alternate method via XPath...")
+                hierarchy = self.device.xpath.dump(pretty=True)
+                if hierarchy and len(hierarchy) > 100:
+                    print("Successfully retrieved UI hierarchy using xpath.dump()")
+                    return hierarchy
+            except Exception as e2:
+                print(f"Error with xpath.dump(): {e2}")
+            
+            # Method 3: Try JSONRpc method (lower level)
+            try:
+                print("Trying JSONRpc method...")
+                hierarchy = self.device.jsonrpc.dumpWindowHierarchy(True)
+                if hierarchy and len(hierarchy) > 100:
+                    print("Successfully retrieved UI hierarchy using jsonrpc.dumpWindowHierarchy()")
+                    return hierarchy
+            except Exception as e3:
+                print(f"Error with jsonrpc.dumpWindowHierarchy(): {e3}")
                 
-                # Use direct uiautomator dump command
-                result = subprocess.run(
-                    ["adb", "shell", f"uiautomator dump {dump_path}"], 
-                    capture_output=True, text=True, shell=True
-                )
+            # Method 4: Try initializing the agent and then dumping
+            try:
+                print("Trying to initialize ATX agent...")
+                subprocess.run(["python", "-m", "uiautomator2", "init", "--reinstall"], 
+                              capture_output=True, text=True)
+                time.sleep(2)
                 
-                if "ERROR" in result.stdout or "Exception" in result.stdout:
-                    print(f"Error dumping to {dump_path}: {result.stdout}")
-                    continue
-                
-                # Try to read the dumped file
-                cat_result = subprocess.run(
-                    ["adb", "shell", f"cat {dump_path}"],
-                    capture_output=True, text=True
-                )
-                
-                if cat_result.returncode == 0 and len(cat_result.stdout) > 100:
-                    print(f"Successfully retrieved UI hierarchy from {dump_path}")
-                    return cat_result.stdout
+                # Try again after initialization
+                hierarchy = self.device.dump_hierarchy()
+                if hierarchy and len(hierarchy) > 100:
+                    print("Successfully retrieved UI hierarchy after initialization")
+                    return hierarchy
+            except Exception as e4:
+                print(f"Error with ATX agent initialization: {e4}")
             
-            # If we reach here, try the no-path version as last resort
-            print("Trying default dump location...")
-            subprocess.run(["adb", "shell", "uiautomator dump"], 
-                          capture_output=True, text=True)
-            
-            default_result = subprocess.run(
-                ["adb", "shell", "cat /sdcard/window_dump.xml"],
-                capture_output=True, text=True
-            )
-            
-            if default_result.returncode == 0 and len(default_result.stdout) > 100:
-                print("Successfully retrieved UI hierarchy from default location")
-                return default_result.stdout
-            
-            # If all else fails, try pulling the file and reading it locally
-            print("Trying to pull UI dump file...")
-            subprocess.run(["adb", "pull", "/sdcard/window_dump.xml", "window_dump.xml"], 
-                          capture_output=True, text=True)
-            
-            if os.path.exists("window_dump.xml"):
-                with open("window_dump.xml", "r") as f:
-                    content = f.read()
-                if len(content) > 100:
-                    print("Successfully retrieved UI hierarchy by pulling file")
-                    return content
-            
+            # All methods failed
             print("All methods to get UI hierarchy failed")
             return None
             
@@ -721,6 +711,19 @@ class AndroidVisionAgent:
                 if user_input.lower() != 'y':
                     print("Exiting.")
                     return
+            
+            # Try to initialize UIAutomator2 at startup
+            try:
+                print("\nAttempting to initialize UIAutomator2 services...")
+                init_result = subprocess.run(["python", "-m", "uiautomator2", "init"], 
+                              capture_output=True, text=True)
+                if "Success" in init_result.stdout:
+                    print("✅ UIAutomator2 initialization successful")
+                else:
+                    print("⚠️ UIAutomator2 initialization may not have succeeded, but we'll continue")
+            except Exception as e:
+                print(f"Error initializing UIAutomator2: {e}")
+                print("Continuing anyway...")
             
             # Main interaction loop
             while True:
