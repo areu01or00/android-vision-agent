@@ -1,147 +1,111 @@
-# Android AI Agent
+# Android Vision Agent
 
-A vision-powered automation tool for Android devices using GPT-4o vision capabilities to interact with UI elements.
-
-## Overview
-
-The Android AI Agent is a powerful tool that uses GPT-4o's vision capabilities to analyze Android screens and perform actions based on natural language commands. Instead of hard-coding UI interactions for each application, the agent takes screenshots, sends them to GPT-4o for analysis, and follows its recommendations.
-
-This approach allows the agent to:
-- Work with any app without app-specific code
-- Adapt to UI changes and different app versions
-- Handle complex tasks with natural language instructions
-- Find and interact with UI elements based on visual appearance
+A powerful AI-driven automation tool for Android devices that combines direct actions with vision-based guidance.
 
 ## Features
 
-- **Vision-First Approach**: Uses GPT-4o vision model to understand what's on screen
-- **Natural Language Control**: Operate your device with plain-language commands
-- **App Agnostic**: Works with any Android app without customization
-- **Zero App-Specific Code**: No need to write custom code for different apps
-- **Adapts to UI Changes**: Works even when apps update their interface
-- **Multiple Input Methods**: Handles text input challenges with multiple fallback methods
-- **Screen Mirroring**: View device actions in real-time with scrcpy
-- **Explanatory Output**: Detailed logs of what is happening at each step
+- **Fast Direct Actions**: Instantly launches apps and performs common tasks without screenshots
+- **Vision-Guided Navigation**: Uses GPT-4o vision model to navigate complex UI interactions
+- **Smart Task Planning**: Automatically breaks down complex tasks into executable steps
+- **Robust Text Input**: Multiple fallback methods for reliable text entry
+- **Adaptive Execution**: Combines direct commands with vision for optimal performance
 
 ## Requirements
 
 - Python 3.8+
 - Android device with USB debugging enabled
-- USB connection to your Android device
-- ADB (Android Debug Bridge) installed and configured
-- OpenAI API key (for GPT-4o access)
-- scrcpy (for screen mirroring, optional but recommended)
+- OpenAI API key (for GPT-4o vision model)
+- scrcpy installed (for screen mirroring)
+- adb command-line tools
 
-## Setup
+## Installation
 
-### 1. Connect your Android device
+1. Clone this repository:
+   ```
+   git clone https://github.com/areu01or00/android-vision-agent.git
+   cd android-vision-agent
+   ```
 
-1. Enable Developer Options and USB Debugging on your Android device
-2. Connect your device to your computer via USB
-3. Authorize USB debugging when prompted on your device
-4. Verify connection with `adb devices` (your device should be listed)
+2. Create a virtual environment and install dependencies:
+   ```
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-### 2. Install the required Python packages
+3. Create a `.env` file in the project root with your OpenAI API key:
+   ```
+   OPENAI_API_KEY=your_api_key_here
+   ```
 
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Set up your OpenAI API key
-
-Create a `.env` file in the project root with your OpenAI API key:
-
-```
-OPENAI_API_KEY=your-api-key-here
-```
-
-Or set it as an environment variable:
-
-```bash
-export OPENAI_API_KEY=your-api-key-here
-```
-
-### 4. Install scrcpy (optional but recommended)
-
-For real-time visualization of device actions:
-
-**Ubuntu/Debian:**
-```bash
-apt install scrcpy
-```
-
-**macOS:**
-```bash
-brew install scrcpy
-```
-
-**Windows:**
-Download from [https://github.com/Genymobile/scrcpy/releases](https://github.com/Genymobile/scrcpy/releases)
+4. Connect your Android device via USB and enable USB debugging
 
 ## Usage
 
-Run the AI agent with a task to perform:
-
-```bash
-python android_ai_agent.py
+Run the agent:
+```
+python simple_android_vision_agent.py
 ```
 
-You'll be prompted to enter a task. Examples of tasks:
-
-- "Open Twitter and search for news"
-- "Open camera and take a photo"
-- "Open Gmail and compose a new email to someone@example.com"
-- "Open Zomato and search for McDonald's"
-
-The agent will:
-1. Parse your command to understand the intent
-2. Open the required app
-3. Take a screenshot
-4. Analyze the screen with GPT-4o vision
-5. Perform the appropriate actions based on visual analysis
-6. Repeat steps 3-5 for multi-step tasks
+Enter tasks using natural language, for example:
+- "open twitter and search for AI news"
+- "open chrome and search for medicinal properties of marijuana"
+- "open gmail and compose an email to example@gmail.com"
+- "open youtube and search for funny cat videos"
 
 ## How It Works
 
-1. **Task Parsing**: The AI breaks down your natural language request into structured actions
-2. **App Launching**: Opens the target application
-3. **Screenshot Analysis**: Takes a screenshot of the current state
-4. **Vision-Guided Action**: GPT-4o analyzes the screenshot and recommends precise actions
-5. **Execution**: The agent performs the recommended actions (clicks, text input, etc.)
-6. **Verification**: Another screenshot is taken to verify the results
-7. **Next Steps**: For multi-step tasks, the process repeats from step 3
+The Android Vision Agent uses a two-phase approach to execute tasks:
 
-## Known Limitations
+1. **Task Planning Phase**:
+   - A language model (GPT-3.5 Turbo) analyzes the task
+   - Determines if direct app launching is possible
+   - Identifies additional steps needed after app launch
+   - Creates a structured execution plan
 
-- **Text Input Challenges**: Android's keyboard input can be challenging; multiple fallback methods are implemented
-- **API Costs**: Uses OpenAI's GPT-4o API, which has usage costs
-- **Vision Model Availability**: Requires access to GPT-4o or another vision model
-- **Task Complexity**: Very complex, multi-step tasks may require breaking down into simpler steps
-- **App Compatibility**: Some apps with unusual UIs may be challenging
-- **Authentication**: May struggle with apps requiring login (biometrics, CAPTCHA, etc.)
+2. **Execution Phase**:
+   - **Stage 1**: Direct actions (app launching) when possible
+   - **Stage 2**: Vision-guided interactions for complex tasks
+   - The vision model (GPT-4o) analyzes screenshots to determine precise interactions
+   - Executes actions with robust error handling and recovery
 
-## Project Structure
+## Key Components
 
+- **Task Planner**: Breaks down complex tasks into manageable steps
+- **Direct Action Handler**: Executes known actions without vision guidance
+- **Vision-Guided Controller**: Uses screenshots and GPT-4o for complex interactions
+- **Multi-Stage Pipeline**: Manages transitions between direct and vision-guided stages
+
+## Example Flows
+
+**Simple Task**: "open twitter"
 ```
-android-ai-agent/
-├── android_ai_agent.py   # Main agent implementation
-├── requirements.txt      # Python dependencies
-├── README.md            # This file
-└── .env                 # Environment variables (create this)
+1. Task planner identifies this as a direct action
+2. Agent launches Twitter app directly
+3. Task marked as complete
 ```
 
-## Customizing the Agent
+**Complex Task**: "open chrome and search for medicinal properties of marijuana"
+```
+1. Task planner identifies this as a multi-stage task
+2. Stage 1: Direct launch of Chrome app
+3. Stage 2: Vision-guided process to:
+   - Find and click search bar
+   - Input search text
+   - Submit search
+   - Verify results
+```
 
-You can modify the `analyze_screen_with_vision` method to adjust how the agent interprets screens or change the prompts to optimize for specific types of interactions.
+## Limitations
+
+- Requires physical access to the Android device
+- Some apps may have security measures preventing automation
+- Performance depends on OpenAI API responsiveness
+- Screen recording not supported in some secure apps
 
 ## Contributing
 
-Contributions are welcome! Areas for improvement:
-
-- Add support for more vision models
-- Improve text input reliability
-- Enhance task parsing for complex instructions
-- Add better error recovery mechanisms
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
