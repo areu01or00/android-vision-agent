@@ -7,6 +7,7 @@ import re
 import uiautomator2 as u2
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
+import hashlib
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -23,6 +24,8 @@ class AndroidVisionAgent:
         self.action_count = 0
         self.width = 0
         self.height = 0
+        self.ui_hash_cache = {}  # Cache for UI hashes -> actions
+        self.last_ui_hash = None
         
         # Common package names for direct app launching
         self.common_packages = {
@@ -169,7 +172,7 @@ class AndroidVisionAgent:
                 return self.common_packages[app_name]
         
         # Also handle "open app X" pattern
-        for pattern in [r'open (?:the )?(?:app )?(\\w+)', r'launch (?:the )?(?:app )?(\\w+)', r'start (?:the )?(?:app )?(\\w+)']:
+        for pattern in [r'open (?:the )?(?:app )?(\w+)', r'launch (?:the )?(?:app )?(\w+)', r'start (?:the )?(?:app )?(\w+)']:
             match = re.search(pattern, task_lower)
             if match:
                 app_name = match.group(1).strip()
@@ -236,6 +239,74 @@ class AndroidVisionAgent:
             print(f"Error getting UI hierarchy: {e}")
             return None
     
+    def compute_ui_hash(self, xml_content):
+        """Compute a hash of the UI hierarchy to detect changes and enable caching."""
+        try:
+            # Parse the XML
+            soup = BeautifulSoup(xml_content, 'lxml-xml')
+            
+            # Find all interactive elements (buttons, text fields, etc.)
+            interactive_elements = soup.find_all(['node'], {'clickable': 'true'})
+            interactive_elements += soup.find_all(['node'], {'class': lambda x: x and ('Button' in x or 'EditText' in x)})
+            
+            # Extract key properties (bounds, text, resourceId)
+            key_properties = []
+            for elem in interactive_elements:
+                props = {
+                    'bounds': elem.get('bounds', ''),
+                    'text': elem.get('text', ''),
+                    'resourceId': elem.get('resource-id', '')
+                }
+                key_properties.append(json.dumps(props))
+            
+            # Create a stable representation and hash it
+            sorted_props = sorted(key_properties)
+            hash_input = '|'.join(sorted_props)
+            hash_obj = hashlib.md5(hash_input.encode())
+            return hash_obj.hexdigest()
+        except Exception as e:
+            print(f"Error computing UI hash: {e}")
+            return None
+        
+    def preprocess_xml(self, xml_content):
+        """Preprocess XML to make it more efficient for the LLM to process."""
+        try:
+            # Parse the XML
+            soup = BeautifulSoup(xml_content, 'lxml-xml')
+            
+            # Simplify text nodes by truncating long text
+            for node in soup.find_all('node'):
+                if node.has_attr('text') and len(node['text']) > 50:
+                    node['text'] = node['text'][:50] + "..."
+                    
+            # Remove deeply nested non-interactive elements to reduce size
+            def simplify_node(node, depth=0):
+                if depth > 5:  # Don't go too deep
+                    return
+                    
+                children = list(node.find_all('node', recursive=False))
+                for child in children:
+                    # Keep if it's interactive or has text
+                    is_interactive = (
+                        child.get('clickable') == 'true' or 
+                        (child.get('class') and ('Button' in child['class'] or 'Text' in child['class'] or 'EditText' in child['class']))
+                    )
+                    has_text = child.get('text') and child['text'].strip()
+                    
+                    if not (is_interactive or has_text) and not child.find('node'):
+                        child.decompose()  # Remove if not useful
+                    else:
+                        simplify_node(child, depth+1)
+            
+            # Apply simplification to top-level nodes
+            for node in soup.find_all('node', recursive=False):
+                simplify_node(node)
+                
+            return str(soup)
+        except Exception as e:
+            print(f"Error preprocessing XML: {e}")
+            return xml_content  # Return original if processing fails
+    
     def extract_ui_metadata(self, xml_content):
         """Extract metadata about the UI from XML for better LLM understanding."""
         try:
@@ -292,15 +363,35 @@ class AndroidVisionAgent:
                 "screen_dimensions": {"width": 0, "height": 0}
             }
     
-    async def analyze_ui_with_llm(self, xml_content, task, context=None):
-        """Have LLM analyze XML hierarchy and determine next action."""
+    async def analyze_ui_with_multi_step_planning(self, xml_content, task, context=None):
+        """Have LLM analyze XML hierarchy and plan multiple steps."""
         if not xml_content:
             print("No XML content to analyze")
             return None
         
         try:
+            # Compute hash of UI to detect if we've seen this state before
+            ui_hash = self.compute_ui_hash(xml_content)
+            
+            # Check if we've seen this UI state before
+            if ui_hash and ui_hash in self.ui_hash_cache:
+                cached_plan = self.ui_hash_cache[ui_hash]
+                print("⚡ Using cached multi-step plan for similar UI state")
+                return cached_plan
+            
+            # Check if UI is similar to the last UI (for repetitive actions like scrolling)
+            minor_change = False
+            if self.last_ui_hash and ui_hash:
+                # For now, assume all states require fresh planning
+                # In a more sophisticated implementation, this could detect minor changes
+                # like scrolling and reuse the previous plan
+                self.last_ui_hash = ui_hash
+            
             # Extract metadata to help the LLM understand the UI
             metadata = self.extract_ui_metadata(xml_content)
+            
+            # Preprocess XML to make it more digestible for the LLM
+            processed_xml = self.preprocess_xml(xml_content)
             
             # Create context description for the LLM
             context_info = ""
@@ -309,13 +400,18 @@ class AndroidVisionAgent:
                 for i, action in enumerate(context["previous_actions"]):
                     context_info += f"{i+1}. {action['description']}\n"
             
-            system_prompt = """
+            # Determine how many steps to plan based on complexity
+            max_steps_to_plan = 3
+            if "scroll" in task.lower():
+                max_steps_to_plan = 5  # More steps for scrolling tasks
+                
+            system_prompt = f"""
             You are an expert Android automation assistant that can precisely control a device by analyzing UI XML hierarchies.
             
-            You need to:
+            Your task is to:
             1. Analyze the XML hierarchy representation of the current Android screen
-            2. Identify the elements needed to complete the user's task
-            3. Determine the EXACT next action to take
+            2. Plan the next {max_steps_to_plan} actions to complete the user's task efficiently
+            3. Be specific about each action with exact element identifiers
             
             IMPORTANT: Instead of using x,y coordinates, ALWAYS use element identifiers when possible.
             This ensures precise interaction with the right UI elements.
@@ -335,27 +431,40 @@ class AndroidVisionAgent:
             
             - "wait": Wait for a specific condition
             
+            For repetitive actions like scrolling multiple times, combine them into a single action with a count.
+            
             Return ONLY valid JSON in this format:
             ```json
-            {
+            {{
               "current_screen": "Identify what screen user is on",
-              "action": {
-                "type": "click_element | input_text | scroll | back | wait",
-                "target": {
-                  "method": "resourceId | text | content-desc | class",
-                  "value": "The exact identifier from the XML",
-                  "fallback_index": 0 
-                },
-                "text": "Text to input if action is input_text",
-                "direction": "up | down | left | right (for scroll action)",
-                "duration": 5 (seconds to wait if action is wait)
-              },
-              "reasoning": "Detailed explanation of why this is the next step",
-              "is_task_complete": false
-            }
+              "multi_step_plan": [
+                {{
+                  "action": {{
+                    "type": "click_element | input_text | scroll | back | wait",
+                    "target": {{
+                      "method": "resourceId | text | content-desc | class",
+                      "value": "The exact identifier from the XML",
+                      "fallback_index": 0 
+                    }},
+                    "text": "Text to input if action is input_text",
+                    "direction": "up | down | left | right (for scroll action)",
+                    "duration": 5 (seconds to wait if action is wait),
+                    "repeat_count": 1 (number of times to repeat this action, default 1)
+                  }},
+                  "description": "Human-readable description of this step",
+                  "expected_outcome": "What should happen after this action"
+                }}
+                // ... more steps up to {max_steps_to_plan}
+              ],
+              "reasoning": "Detailed explanation of this plan",
+              "is_task_complete": false,
+              "requires_verification_after": true/false (whether to check UI after executing)
+            }}
             ```
             
             Only set is_task_complete to true when the entire task is finished.
+            If requires_verification_after is true, UI will be checked after executing the steps.
+            For scrolling or repetitive actions, set requires_verification_after to true after multiple steps.
             
             Always use element identifiers from the XML, not made-up ones.
             """
@@ -369,153 +478,157 @@ class AndroidVisionAgent:
             
             UI HIERARCHY XML:
             ```xml
-            {xml_content}
+            {processed_xml}
             ```
             
-            Based on this XML representation of the current UI, determine the next action to take.
+            Based on this XML representation of the current UI, plan the next {max_steps_to_plan} actions to take.
             """
             
-            # Call the OpenAI API
+            # Call the OpenAI API with gpt-4o-mini (more efficient for XML analysis)
             response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo",  # Using GPT-4 Turbo instead of GPT-4o for text analysis
+                model="gpt-4o-mini",  # Using GPT-4o-mini for efficiency
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 response_format={"type": "json_object"},
-                max_tokens=1000
+                max_tokens=2000,
+                temperature=0.2  # Lower temperature for more deterministic responses
             )
             
             # Parse the response
-            analysis = json.loads(response.choices[0].message.content)
-            print(f"UI Analysis: {json.dumps(analysis, indent=2)}")
+            multi_step_plan = json.loads(response.choices[0].message.content)
+            print(f"Multi-step plan: {json.dumps(multi_step_plan, indent=2)}")
             
-            return analysis
+            # Cache this plan for this UI state
+            if ui_hash:
+                self.ui_hash_cache[ui_hash] = multi_step_plan
+                self.last_ui_hash = ui_hash
+            
+            return multi_step_plan
         except Exception as e:
             print(f"Error analyzing UI with LLM: {e}")
             return None
 
     async def execute_ui_action(self, action_data):
         """Execute action based on LLM guidance using element selectors instead of coordinates."""
-        if not action_data or not action_data.get("action"):
+        if not action_data or not isinstance(action_data, dict):
             return "No action to execute"
         
-        action = action_data["action"]
-        action_type = action.get("type")
-        reasoning = action_data.get("reasoning", "No reasoning provided")
-        current_screen = action_data.get("current_screen", "Unknown screen")
-        
-        print(f"Current screen: {current_screen}")
-        print(f"Executing action: {action_type}")
-        print(f"Reasoning: {reasoning}")
+        action_type = action_data.get("type")
+        target = action_data.get("target", {})
+        method = target.get("method")
+        value = target.get("value")
+        fallback_index = target.get("fallback_index", 0)
+        repeat_count = action_data.get("repeat_count", 1)
         
         try:
-            if action_type == "click_element":
-                target = action.get("target", {})
-                method = target.get("method")
-                value = target.get("value")
-                fallback_index = target.get("fallback_index", 0)
-                
-                if not method or not value:
-                    return "Invalid click_element action: missing method or value"
-                
-                print(f"Clicking element: {method}='{value}'")
-                
-                # Map method to uiautomator2 selector
-                selector = {}
-                if method == "resourceId":
-                    selector = {"resourceId": value}
-                elif method == "text":
-                    selector = {"text": value}
-                elif method == "content-desc":
-                    selector = {"description": value}
-                elif method == "class":
-                    selector = {"className": value, "instance": fallback_index}
-                else:
-                    return f"Unsupported selector method: {method}"
-                
-                # Try to find and click the element
-                element = self.device(**selector)
-                if element.exists:
-                    element.click()
-                    return f"Clicked element: {method}='{value}'"
-                else:
-                    print(f"⚠️ Element not found: {method}='{value}'")
-                    return f"Element not found: {method}='{value}'"
-            
-            elif action_type == "input_text":
-                target = action.get("target", {})
-                method = target.get("method")
-                value = target.get("value")
-                fallback_index = target.get("fallback_index", 0)
-                text = action.get("text", "")
-                
-                if not method or not value:
-                    return "Invalid input_text action: missing method or value"
-                if not text:
-                    return "Invalid input_text action: missing text to input"
-                
-                print(f"Inputting text into: {method}='{value}'")
-                print(f"Text: '{text}'")
-                
-                # Map method to uiautomator2 selector
-                selector = {}
-                if method == "resourceId":
-                    selector = {"resourceId": value}
-                elif method == "text":
-                    selector = {"text": value}
-                elif method == "content-desc":
-                    selector = {"description": value}
-                elif method == "class":
-                    selector = {"className": value, "instance": fallback_index}
-                else:
-                    return f"Unsupported selector method: {method}"
-                
-                # Try to find the element and input text
-                element = self.device(**selector)
-                if element.exists:
-                    # Clear existing text first
-                    try:
-                        element.clear_text()
-                    except Exception as e_clear:
-                        print(f"Couldn't clear text (may be normal): {e_clear}")
+            for i in range(repeat_count):
+                if i > 0:
+                    print(f"Repeating action {i+1}/{repeat_count}...")
                     
-                    # Set text
-                    element.set_text(text)
-                    return f"Entered text '{text}' into {method}='{value}'"
-                else:
-                    print(f"⚠️ Element not found for text input: {method}='{value}'")
-                    return f"Element not found for text input: {method}='{value}'"
-            
-            elif action_type == "scroll":
-                direction = action.get("direction", "down")
+                if action_type == "click_element":
+                    if not method or not value:
+                        return "Invalid click_element action: missing method or value"
+                    
+                    print(f"Clicking element: {method}='{value}'")
+                    
+                    # Map method to uiautomator2 selector
+                    selector = {}
+                    if method == "resourceId":
+                        selector = {"resourceId": value}
+                    elif method == "text":
+                        selector = {"text": value}
+                    elif method == "content-desc":
+                        selector = {"description": value}
+                    elif method == "class":
+                        selector = {"className": value, "instance": fallback_index}
+                    else:
+                        return f"Unsupported selector method: {method}"
+                    
+                    # Try to find and click the element
+                    element = self.device(**selector)
+                    if element.exists:
+                        element.click()
+                        result = f"Clicked element: {method}='{value}'"
+                    else:
+                        print(f"⚠️ Element not found: {method}='{value}'")
+                        result = f"Element not found: {method}='{value}'"
                 
-                if direction == "down":
-                    self.device.swipe(self.width/2, self.height*0.7, self.width/2, self.height*0.3)
-                elif direction == "up":
-                    self.device.swipe(self.width/2, self.height*0.3, self.width/2, self.height*0.7)
-                elif direction == "left":
-                    self.device.swipe(self.width*0.7, self.height/2, self.width*0.3, self.height/2)
-                elif direction == "right":
-                    self.device.swipe(self.width*0.3, self.height/2, self.width*0.7, self.height/2)
-                else:
-                    return f"Invalid scroll direction: {direction}"
+                elif action_type == "input_text":
+                    text = action_data.get("text", "")
+                    if not method or not value:
+                        return "Invalid input_text action: missing method or value"
+                    if not text:
+                        return "Invalid input_text action: missing text to input"
+                    
+                    print(f"Inputting text into: {method}='{value}'")
+                    print(f"Text: '{text}'")
+                    
+                    # Map method to uiautomator2 selector
+                    selector = {}
+                    if method == "resourceId":
+                        selector = {"resourceId": value}
+                    elif method == "text":
+                        selector = {"text": value}
+                    elif method == "content-desc":
+                        selector = {"description": value}
+                    elif method == "class":
+                        selector = {"className": value, "instance": fallback_index}
+                    else:
+                        return f"Unsupported selector method: {method}"
+                    
+                    # Try to find the element and input text
+                    element = self.device(**selector)
+                    if element.exists:
+                        # Clear existing text first
+                        try:
+                            element.clear_text()
+                        except Exception as e_clear:
+                            print(f"Couldn't clear text (may be normal): {e_clear}")
+                        
+                        # Set text
+                        element.set_text(text)
+                        result = f"Entered text '{text}' into {method}='{value}'"
+                    else:
+                        print(f"⚠️ Element not found for text input: {method}='{value}'")
+                        result = f"Element not found for text input: {method}='{value}'"
                 
-                return f"Scrolled {direction}"
-            
-            elif action_type == "back":
-                print("Pressing back button")
-                self.device.press("back")
-                return "Pressed back button"
-            
-            elif action_type == "wait":
-                duration = action.get("duration", 3)
-                print(f"Waiting for {duration} seconds...")
-                await asyncio.sleep(duration)
-                return f"Waited for {duration} seconds"
-            
-            else:
-                return f"Unknown action type: {action_type}"
+                elif action_type == "scroll":
+                    direction = action_data.get("direction", "down")
+                    
+                    if direction == "down":
+                        self.device.swipe(self.width/2, self.height*0.7, self.width/2, self.height*0.3)
+                    elif direction == "up":
+                        self.device.swipe(self.width/2, self.height*0.3, self.width/2, self.height*0.7)
+                    elif direction == "left":
+                        self.device.swipe(self.width*0.7, self.height/2, self.width*0.3, self.height/2)
+                    elif direction == "right":
+                        self.device.swipe(self.width*0.3, self.height/2, self.width*0.7, self.height/2)
+                    else:
+                        return f"Invalid scroll direction: {direction}"
+                    
+                    result = f"Scrolled {direction}"
+                
+                elif action_type == "back":
+                    print("Pressing back button")
+                    self.device.press("back")
+                    result = "Pressed back button"
+                
+                elif action_type == "wait":
+                    duration = action_data.get("duration", 3)
+                    print(f"Waiting for {duration} seconds...")
+                    await asyncio.sleep(duration)
+                    result = f"Waited for {duration} seconds"
+                
+                else:
+                    return f"Unknown action type: {action_type}"
+                
+                # Short pause between repetitions of the same action
+                if i < repeat_count - 1:
+                    await asyncio.sleep(0.5)
+                
+            return result
         
         except Exception as e:
             error_msg = f"Action failed: {e}"
@@ -587,13 +700,13 @@ class AndroidVisionAgent:
         app_name = "unknown"
         
         if app_to_launch:
-            print(f"📱 Stage 1: Launching app directly ({app_to_launch})")
+            print(f"📱 Stage 1: Launching {app_to_launch} directly")
             try:
                 self.device.app_start(app_to_launch)
                 await asyncio.sleep(2)  # Wait for app to start
                 direct_launch_success = True
                 app_name = app_to_launch.split('.')[-1]
-                print(f"✅ Successfully launched app ({app_to_launch})")
+                print(f"✅ Successfully launched {app_name}")
             except Exception as e:
                 print(f"⚠️ Direct app launch failed: {e}")
         
@@ -629,8 +742,10 @@ class AndroidVisionAgent:
         }
         
         # Execute steps with XML guidance
-        steps_taken = 0
-        max_steps = 15
+        planning_cycles = 0
+        max_planning_cycles = 5
+        total_steps_taken = 0
+        max_total_steps = 20
         results = []
         
         if direct_launch_success:
@@ -639,12 +754,14 @@ class AndroidVisionAgent:
             })
             results.append(f"Launched app {app_name}")
         
-        while steps_taken < max_steps:
-            steps_taken += 1
+        task_complete = False
+        
+        while planning_cycles < max_planning_cycles and total_steps_taken < max_total_steps and not task_complete:
+            planning_cycles += 1
             
             try:
                 # Get UI hierarchy XML
-                print(f"\nStep {steps_taken}: Getting UI hierarchy...")
+                print(f"\nPlanning cycle {planning_cycles}: Getting UI hierarchy...")
                 xml_content = self.get_ui_hierarchy_xml()
                 
                 if not xml_content:
@@ -652,43 +769,67 @@ class AndroidVisionAgent:
                     results.append("Failed to get UI hierarchy")
                     break
                 
-                # Analyze UI with LLM
-                print("Analyzing UI with LLM...")
-                analysis = await self.analyze_ui_with_llm(xml_content, task, context)
+                # Analyze UI with LLM and get multi-step plan
+                print("Analyzing UI with LLM for multi-step planning...")
+                multi_step_plan = await self.analyze_ui_with_multi_step_planning(xml_content, task, context)
                 
-                if not analysis:
+                if not multi_step_plan:
                     print("Failed to analyze UI")
                     results.append("Failed to analyze UI")
                     break
                 
-                # Execute action
-                result = await self.execute_ui_action(analysis)
-                results.append(result)
-                
-                # Update context with this action
-                context["previous_actions"].append({
-                    "description": result
-                })
+                # Execute each action in the multi-step plan
+                step_count = 0
+                for step in multi_step_plan.get("multi_step_plan", []):
+                    step_count += 1
+                    total_steps_taken += 1
+                    
+                    if total_steps_taken > max_total_steps:
+                        print(f"Reached maximum total steps limit ({max_total_steps})")
+                        break
+                    
+                    print(f"\nStep {total_steps_taken}: {step.get('description', 'Executing action')}")
+                    action_data = step.get("action", {})
+                    
+                    # Execute action
+                    result = await self.execute_ui_action(action_data)
+                    results.append(result)
+                    
+                    # Update context with this action
+                    context["previous_actions"].append({
+                        "description": result
+                    })
+                    
+                    # Wait a bit after action to let UI update
+                    await asyncio.sleep(1)
                 
                 # Check if task is complete
-                if analysis.get("is_task_complete", False):
+                if multi_step_plan.get("is_task_complete", False):
                     print("Task marked as complete by the LLM")
+                    task_complete = True
                     break
                 
-                # Wait a bit after action to let UI update
+                # Check if we need to verify after executing the plan
+                requires_verification = multi_step_plan.get("requires_verification_after", True)
+                
+                if not requires_verification and not task_complete:
+                    # If no verification needed and more steps planned, execute them without checking UI again
+                    continue
+                
+                # Wait a bit longer after all steps to let UI update fully
                 await asyncio.sleep(1.5)
             
             except Exception as e:
-                error_msg = f"Error in step {steps_taken}: {e}"
+                error_msg = f"Error in planning cycle {planning_cycles}: {e}"
                 print(error_msg)
                 results.append(error_msg)
                 break
         
-        if steps_taken >= max_steps:
+        if total_steps_taken >= max_total_steps:
             results.append("Maximum steps reached, task may be incomplete")
         
         print("\n✅ Task execution finished!")
-        print(f"Completed in {steps_taken} steps")
+        print(f"Completed in {total_steps_taken} steps")
         return "\n".join(results)
     
     async def interactive_session(self):
