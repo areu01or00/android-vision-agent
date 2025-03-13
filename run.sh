@@ -33,5 +33,5 @@ if [ -z "$OPENAI_API_KEY" ]; then
 fi
 
 # Run the agent
-echo "Starting Android AI Agent..."
-python android_ai_agent.py
+echo "Starting Android Vision Agent..."
+python android_vision_agent.py
