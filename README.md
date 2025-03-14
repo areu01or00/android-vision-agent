@@ -13,6 +13,16 @@ A powerful AI-driven automation tool for Android devices that uses a hybrid appr
 - **Robust Error Recovery**: Automatically detects and breaks out of repetitive action loops
 - **Detailed Session Logs**: Comprehensive logging for debugging and analysis
 - **Screen Recording**: Automatic screen recording during agent sessions
+- **Enhanced Search Task Handling**: Specialized verification for search tasks to ensure completion
+- **Task-Specific Guidance**: Detailed instructions for common tasks like searching, composing emails, and more
+
+## Recent Improvements
+
+- **Enhanced System Prompt**: Added detailed guidance for task execution, including app-specific instructions and verification steps
+- **Improved Search Task Handling**: Added verification to ensure search tasks are properly completed with results displayed
+- **Fixed Typing Command**: Improved text input reliability by removing shell interpretation issues
+- **Added Press Enter Action**: New action type to simulate pressing the Enter key for search submissions
+- **Task-Specific Context**: Added specialized handling for common tasks in Chrome, Gmail, Twitter, and search operations
 
 ## Requirements
 
@@ -73,6 +83,8 @@ You can also use direct commands:
 - `screenshot` - Take a screenshot
 - `launch [app]` - Launch a specific app
 
+For more detailed usage instructions, see [USAGE.md](USAGE.md).
+
 ## Architecture
 
 The Android AI Agent uses a sophisticated hybrid approach:
@@ -111,18 +123,21 @@ The Android AI Agent uses a sophisticated hybrid approach:
 - **Action Determiner**: Decides the next action based on task and current screen state
 - **XML Hierarchy Extractor**: Provides structural data about the UI
 - **Loop Detection**: Identifies and breaks repetitive action patterns
+- **Search Task Verification**: Ensures search tasks are properly completed with results displayed
 
 ## Example Flow
 
-Here's how the agent processes a typical task:
+Here's how the agent processes a typical search task:
 
 1. User inputs task: "open Twitter and search for Rahul Gandhi"
 2. Task analyzer determines Twitter app needs to be launched
 3. Agent launches Twitter app via direct ADB command
 4. Screen context analyzer identifies the current screen using vision + planning models
 5. Action determiner decides to tap on the search field
-6. Agent inputs search query and submits
-7. Agent analyzes results and reports completion
+6. Agent inputs search query "Rahul Gandhi"
+7. Agent presses Enter or taps on a search suggestion
+8. Agent verifies search results are displayed
+9. Agent reports task completion
 
 ## Customization
 
@@ -146,8 +161,8 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-[Your License Here] 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
