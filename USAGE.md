@@ -1,173 +1,160 @@
-# Android Vision Agent Usage Guide
+# Android AI Agent Usage Guide
 
-This document provides information on how to use the Android Vision Agent for automating tasks on Android devices.
+This guide shows you how to use the Android AI Agent with its LLM-based task planning and vision-guided automation.
 
 ## Getting Started
 
-### Prerequisites
-
-- Python 3.8 or higher
-- ADB (Android Debug Bridge) installed and in your PATH
-- scrcpy installed (optional but recommended for visual feedback)
-- An Android device with USB debugging enabled
-- OpenAI API key
-
-### Installation
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/areu01or00/android-vision-agent.git
-   cd android-vision-agent
+1. Connect your Android device via USB
+2. Enable USB debugging on your device
+3. Make sure your API key is in the `.env` file (OpenAI or OpenRouter)
+4. Activate your virtual environment:
    ```
-
-2. Install required packages:
-   ```bash
-   pip install -r requirements.txt
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
-
-3. Initialize UIAutomator2:
-   ```bash
-   python -m uiautomator2 init
+5. Run the agent:
    ```
-
-4. Set up your OpenAI API key:
-   ```bash
-   export OPENAI_API_KEY="your_api_key_here"
+   python android_ai_agent.py
    ```
-   Or create a `.env` file in the project directory with:
-   ```
-   OPENAI_API_KEY=your_api_key_here
-   ```
-
-### Running the Agent
-
-To start the agent:
-```bash
-python android_vision_agent.py
-```
-
-Or use the convenience script:
-```bash
-./run.sh
-```
+6. When prompted, select your LLM provider (OpenAI or OpenRouter)
 
 ## Task Formats
 
-The Android Vision Agent accepts natural language commands. Here are some examples:
+The Android AI Agent supports both simple and complex tasks:
 
-- Simple app launch: `open gmail`
-- Navigational task: `open settings and turn on wifi`
-- Text messaging: `send a message to John saying I'll be late`
-- Social media: `post a new status on twitter saying Hello world`
-- Email: `compose an email to example@example.com with subject Meeting tomorrow`
-- Complex tasks: `find nearby restaurants on google maps, sort by rating and navigate to the top one`
+### Simple App Launch
+```
+open twitter
+launch chrome
+start gmail
+```
+These are executed directly without taking screenshots.
 
-## How It Works
+### Complex Multi-Step Tasks
+```
+open twitter and search for AI news
+open chrome and search for medicinal properties of marijuana
+open gmail and compose an email to example@gmail.com
+```
+These are broken down into stages:
+1. Direct app launch
+2. Vision-guided completion of the remaining steps
 
-The Android Vision Agent uses a two-phase approach:
+## Search Tasks
 
-1. **Initial Task Analysis**: The agent first analyzes your task to determine if it requires launching an app or other direct actions.
+The agent has been enhanced to handle search tasks more effectively:
 
-2. **XML-based UI Analysis with Multi-Step Planning**: The agent uses XML data from the phone's UI to understand what's on screen. It then uses a language model (GPT-4o-mini) to plan multiple steps at once, which is more efficient than planning each step individually.
+```
+search for climate change in chrome
+open twitter and search for latest news
+find information about quantum computing
+```
 
-The agent also uses caching to avoid redundant API calls for similar UI states.
+For search tasks, the agent will:
+1. Identify the search field
+2. Type the search query
+3. Either tap on a search suggestion or press Enter
+4. Verify that search results are displayed before marking the task as complete
 
-## Cost-Efficient Design
+## Available Actions
 
-The Android Vision Agent is designed to be cost-efficient:
+The agent can perform the following actions:
 
-- **Multi-step planning**: Plans multiple actions at once to reduce API calls
-- **XML preprocessing**: Simplifies the UI data before sending to the LLM
-- **UI state caching**: Avoids repeated API calls for similar screens
-- **gpt-4o-mini**: Uses a smaller, more efficient model for text-based analysis
-- **Adaptive verification**: Only checks the UI when necessary
+- **tap**: Tap at specific coordinates on the screen
+- **type**: Input text into a field
+- **scroll**: Scroll in a specified direction (up, down, left, right)
+- **swipe**: Perform a swipe gesture from one point to another
+- **wait**: Wait for a specified amount of time
+- **go_home**: Return to the home screen
+- **press_back**: Press the back button
+- **recent_apps**: Open the recent apps screen
+- **press_enter**: Press the Enter key (useful for search submissions)
 
-## Advanced Features
+## How Tasks Are Processed
 
-### Direct App Launch
+The agent uses a sophisticated approach:
 
-The agent maintains a database of common app package names for direct launching, which bypasses the need for UI analysis for simple "open app" tasks.
+1. **Task Analysis Phase**:
+   - Analyzes your task request
+   - Determines if it requires launching an app
+   - Identifies any task-specific context (search, email composition, etc.)
 
-### Repetitive Action Handling
+2. **Execution Phase**:
+   - For simple tasks: Uses direct app launching
+   - For complex tasks: Combines direct app launching with vision-guided steps
+   - For search tasks: Ensures proper verification of search results
 
-For tasks that involve repetitive actions (like scrolling multiple times), the agent can bundle these into a single operation with a repeat count.
+## Task Examples and What Happens
 
-### Fault Tolerance
+### Example 1: "open twitter"
+```
+📋 Task Analysis:
+  - requires_app: True
+  - app: Twitter
+  
+📱 Launching twitter (com.twitter.android)
+✅ Successfully launched twitter
+```
 
-If an element can't be found using the primary selector method, the agent will try alternative methods like text matching or class+index combinations.
+### Example 2: "open chrome and search for medicinal properties of marijuana"
+```
+📋 Task Analysis:
+  - requires_app: True
+  - app: Chrome
+  
+📱 Launching chrome (com.android.chrome)
+✅ Successfully launched chrome
+
+📱 Iteration 1/15
+🔍 Determining next action...
+📱 Tapping at coordinates: 540, 200 (50.0%, 12.5%)
+⌨️ Typing text: "medicinal properties of marijuana"
+⌨️ Pressing Enter key
+✅ Task completed: open chrome and search for medicinal properties of marijuana
+```
+
+## App-Specific Features
+
+The agent now includes specialized handling for common apps:
+
+### Chrome
+- Opening new tabs
+- Opening incognito tabs
+- Searching for information
+- Navigating to URLs
+
+### Gmail
+- Composing new emails
+- Finding the compose button
+- Filling in recipient, subject, and body fields
+
+### Twitter
+- Creating new tweets
+- Finding the compose tweet button
+- Searching for tweets or accounts
+
+## Tips for Best Results
+
+1. **Be Specific**: Clearly state which app you want to use
+2. **Use Natural Language**: The agent understands phrases like "open X and do Y"
+3. **For Search Tasks**: Include the search query clearly in your request
+4. **Watch the Output**: The agent provides detailed progress information
+5. **Feedback**: After a task completes, provide feedback on whether it worked
 
 ## Troubleshooting
 
-### UIAutomator Issues
+If you encounter issues:
 
-If you experience issues with UI hierarchy retrieval:
+1. **App Not Found**: Make sure the app is installed on your device
+2. **Connection Issues**: Verify USB debugging is enabled and authorized
+3. **Vision Analysis Failures**: Sometimes retry with clearer instructions
+4. **Text Input Problems**: The agent now uses a more reliable method for text input
 
-```bash
-# Reinitialize UIAutomator2 with reinstall option
-python -m uiautomator2 init --reinstall
+For more detailed troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
-# Check if the UIAutomator service is running
-adb shell "ps -A | grep uiautomator"
-```
+## Advanced Features
 
-### Connection Issues
-
-If the agent can't connect to your device:
-
-```bash
-# List connected devices
-adb devices
-
-# Restart ADB
-adb kill-server
-adb start-server
-```
-
-### XML Hierarchy Not Available
-
-The agent tries multiple methods to get the UI hierarchy. If all fail, you may need to:
-
-```bash
-# Manually dump UI hierarchy to check if working
-adb shell uiautomator dump /sdcard/window_dump.xml
-adb pull /sdcard/window_dump.xml
-
-# Create writable directory if needed
-adb shell "mkdir -p /data/local/tmp"
-adb shell "chmod 777 /data/local/tmp"
-adb shell "uiautomator dump /data/local/tmp/view.xml"
-adb pull /data/local/tmp/view.xml
-```
-
-## Performance Optimization
-
-To get the best performance:
-
-1. Use a USB 3.0 connection instead of wireless debugging
-2. Keep your device screen on and unlocked
-3. Close unnecessary background apps on your phone
-4. Ensure your phone has sufficient storage space available
-5. Consider lowering resolution with scrcpy if using screen mirroring
-
-## Environment Variables
-
-- `OPENAI_API_KEY`: Your OpenAI API key (required)
-- `OPENAI_MODEL`: Override the default model (optional)
-- `DEBUG_MODE`: Set to "1" for verbose logging (optional)
-
-## Examples
-
-### Navigation Example
-```
-open settings and navigate to connections
-```
-
-### Social Media Example
-```
-open twitter and search for #androiddev
-```
-
-### Productivity Example
-```
-open gmail, compose a new email to boss@example.com with subject Quarterly Report and body The report is ready for review
-```
+- **Context Awareness**: The vision model is informed about completed steps
+- **Adaptive Delays**: Different waits based on action type
+- **Error Recovery**: Detects and breaks out of repetitive action loops
+- **Task Analysis**: Shows reasoning for each action taken
+- **Search Verification**: Ensures search tasks are properly completed with results displayed
