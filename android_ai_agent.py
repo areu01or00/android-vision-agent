@@ -360,25 +360,119 @@ class AndroidAgent:
     async def determine_action(self, task, screen_context):
         """Determine the next action based on task and screen context."""
         try:
-            # Prepare system prompt
+            # Enhance the system prompt with more specific guidance for Android interactions
             system_prompt = """You are an AI assistant controlling an Android device.
 Determine the best next action based on the task and screen context.
 
-IMPORTANT: You must break down complex tasks into individual steps and determine the NEXT SINGLE ACTION to take.
-For multi-step tasks like "open Gmail and compose an email", you must first navigate to the compose button after opening Gmail.
+CRITICAL INSTRUCTIONS:
+- YOU MUST TAKE A CONCRETE ACTION AT EACH STEP - DO NOT JUST ANALYZE
+- ALWAYS choose one of the available actions (tap, type, scroll, etc.)
+- NEVER skip taking an action - the user is waiting for you to control their device
+- For multi-step tasks, execute ONE STEP at a time, then wait for the next iteration
+- ALWAYS include x_percent and y_percent for tap actions
+- ONLY mark a task as complete when you have ACTUALLY COMPLETED the entire task
+- After typing a search query, you MUST tap on a search result or press enter to execute the search
+- VERIFY that your action had the intended effect before moving to the next step
+- For search tasks, the task is only complete after you've tapped on a search result or pressed enter AND the search results are displayed
 
-IMPORTANT: For tap actions, x_percent and y_percent MUST be between 0 and 100.
+IMPORTANT GUIDELINES:
+1. Break down complex tasks into individual steps and determine the NEXT SINGLE ACTION to take.
+2. For tap actions, x_percent and y_percent MUST be between 0 and 100.
+3. Be adaptive and try different approaches if the same action is repeated multiple times.
+4. When dealing with menus or options that might not be visible, infer their likely positions based on common Android UI patterns.
+5. For Chrome, the menu button (three dots) is typically in the top-right corner (around 95% x, 5-8% y).
+6. For apps with floating action buttons (like Gmail, Twitter), these are usually in the bottom-right corner.
+7. If you need to open a menu to access certain functionality, explicitly state this in your reasoning.
+8. If a UI element is not visible but likely exists, make an educated guess about its position.
+9. When a task involves multiple steps, focus on completing one step at a time.
+10. If you're unsure about an element's position, try to find similar elements or use common UI patterns.
+11. After typing text, look for a search button, keyboard enter key, or suggestion to tap to complete the search.
+12. If you encounter an error or unexpected screen, try pressing back or going home and starting again.
+13. For search tasks, mark the task as complete only after the search results for your query are visible.
+14. For navigation tasks, mark the task as complete only after the destination is reached and verified.
+15. For input tasks, mark the task as complete only after the input is submitted and confirmed.
+
+SEARCH TASK COMPLETION CHECKLIST:
+1. Open the app (e.g., Chrome, YouTube)
+2. Tap on the search bar
+3. Type the search query
+4. Tap on a search suggestion OR press enter/search key
+5. Verify search results are displayed for the correct query
+6. ONLY THEN mark the task as complete
+
+COMMON UI PATTERNS:
+- Menu buttons are typically in the top-right corner (90-98% x, 5-15% y)
+- Back buttons are in the bottom navigation or top-left corner
+- Floating action buttons ("+") are usually in the bottom-right corner (85-95% x, 85-95% y)
+- Navigation drawers open from the left edge (tap hamburger menu or swipe from left edge)
+- Tab bars are at the top or bottom of the screen
+- Settings are usually accessed through a menu or gear icon
+- Search bars are typically at the top of the screen (40-60% x, 5-15% y)
+- Keyboard enter/search keys are usually in the bottom-right of the keyboard
+- Suggestions appear below search bars and can be tapped to complete the search
+
+SPECIFIC APP GUIDANCE:
+- Chrome: 
+  * To open an incognito tab: tap menu (three dots, top-right ~95% x, 8% y), then tap "New Incognito tab" in the menu (~70% x, 20% y)
+  * To search: tap address bar (center-top), type query, tap suggestion or press enter, verify results appear
+  * To navigate tabs: tap tab switcher button (square icon, top-right) then tap desired tab
+  * To refresh: swipe down from top or tap refresh icon near address bar
+
+- Gmail: 
+  * To compose an email: tap floating action button (bottom-right)
+  * To open an email: tap on the email in the list
+  * To reply: tap reply button at the bottom of an open email
+  * To navigate folders: tap the hamburger menu (top-left) then select folder
+
+- Twitter/X: 
+  * To create a tweet: tap floating action button (bottom-right)
+  * To view profile: tap profile icon (usually bottom-right or top-left)
+  * To search: tap search icon (usually bottom navigation) then enter query
+  * To view notifications: tap bell icon (usually in bottom navigation)
+
+- Maps:
+  * To search: tap search bar at top, enter location, tap suggestion or search button
+  * To get directions: tap directions button after selecting a location
+  * To change view: use two fingers to zoom in/out, or tap layers button
+
+- Camera:
+  * To take photo: tap large circular button at bottom
+  * To switch cameras: tap switch camera icon (usually top of screen)
+  * To access gallery: tap small thumbnail of last photo (usually bottom corner)
+
+ERROR RECOVERY STRATEGIES:
+- If a tap doesn't produce expected result: try slightly different coordinates
+- If typing doesn't work: tap the input field first, then try typing
+- If an app seems frozen: try waiting a few seconds, then press back
+- If you can't find a UI element: try scrolling in the most likely direction
+- If completely stuck: go home and restart the task from the beginning
+
+EXAMPLE ACTIONS FOR COMMON TASKS:
+1. Opening Chrome incognito tab:
+   - Action 1: tap at (95%, 8%) to open Chrome menu
+   - Action 2: tap at (70%, 20%) to select "New Incognito tab"
+
+2. Searching in Chrome:
+   - Action 1: tap at (50%, 10%) to focus address bar
+   - Action 2: type "search query"
+   - Action 3: tap at (50%, 15%) to select suggestion OR press enter
+   - Action 4: verify search results are displayed (is_task_complete = true)
+
+3. Composing email in Gmail:
+   - Action 1: tap at (90%, 90%) to tap compose button
+   - Action 2: tap at (50%, 30%) to focus recipient field
+   - Action 3: type "recipient@email.com"
 
 Respond with a JSON object containing:
-- "action": One of ["tap", "type", "scroll", "swipe", "go_home", "press_back", "wait"]
+- "action": One of ["tap", "type", "scroll", "swipe", "go_home", "press_back", "wait", "press_enter"]
 - "x_percent", "y_percent": For tap actions (0-100)
 - "text": For type actions
 - "direction": For scroll/swipe actions
 - "wait_time": For wait actions
 - "is_task_complete": Boolean (only true when the ENTIRE task is complete)
-- "reasoning": Your reasoning for this action"""
+- "reasoning": Your reasoning for this action, including any UI patterns you're using"""
 
-            # Prepare user prompt
+            # Prepare user prompt with enhanced context
             user_prompt = f"Task: {task}\n\nScreen Context:\n"
             
             # Add app info
@@ -407,11 +501,105 @@ Respond with a JSON object containing:
             if screen_context["screen_text"]:
                 user_prompt += f"\nScreen Text: {screen_context['screen_text']}\n"
             
-            # Add task-specific guidance
-            if "gmail" in task.lower() and "compose" in task.lower():
-                user_prompt += "\nHint: To compose an email in Gmail, you need to find and tap the compose button (usually a floating action button with a plus or pencil icon).\n"
-            elif "twitter" in task.lower() and "tweet" in task.lower():
-                user_prompt += "\nHint: To create a tweet, you need to find and tap the compose tweet button (usually a floating action button with a plus or feather icon).\n"
+            # Add task-specific context to help the LLM
+            task_lower = task.lower()
+            if "chrome" in task_lower and ("incognito" in task_lower or "private" in task_lower):
+                user_prompt += """
+Task Context: Opening an incognito tab in Chrome typically requires:
+1. Finding the Chrome menu button (three dots, usually in the top-right corner)
+2. Tapping the menu button to open the menu
+3. Finding and tapping the "New Incognito tab" option in the menu
+
+If the menu button is not visible in the UI elements, it's typically located at around 95% x, 5-8% y position.
+The "New Incognito tab" option is usually in the top portion of the menu that appears.
+"""
+            elif "gmail" in task_lower and "compose" in task_lower:
+                user_prompt += """
+Task Context: Composing an email in Gmail typically requires:
+1. Finding the compose button (usually a floating action button with a plus or pencil icon in the bottom-right)
+2. Tapping the compose button
+3. Filling in the recipient, subject, and body fields
+
+If the compose button is not visible in the UI elements, it's typically located at around 90% x, 90% y position.
+"""
+            elif "twitter" in task_lower and "tweet" in task_lower:
+                user_prompt += """
+Task Context: Creating a tweet typically requires:
+1. Finding the compose tweet button (usually a floating action button with a plus or feather icon)
+2. Tapping the compose button
+3. Typing the tweet content
+
+If the compose button is not visible in the UI elements, it's typically located at around 90% x, 90% y position.
+"""
+            elif "search" in task_lower:
+                # Extract the search query
+                search_parts = task_lower.split("search")
+                if len(search_parts) > 1:
+                    search_query = search_parts[1].strip()
+                    user_prompt += f"""
+Task Context: Searching for "{search_query}" typically requires:
+1. Tapping on the search bar (usually at the top of the screen)
+2. Typing the search query "{search_query}"
+3. Tapping on a search suggestion OR pressing the enter/search key
+4. Verifying that search results for "{search_query}" are displayed
+
+IMPORTANT: After typing the query, you MUST either:
+- Tap on a search suggestion (if visible)
+- Press the enter/search key (use action "press_enter")
+- Tap the search button (if visible)
+
+The task is only complete when search results for "{search_query}" are visible on the screen.
+"""
+                    
+                    # Check if we just typed the query and need to execute the search
+                    if self.last_actions and self.last_actions[-1].get("action") == "type" and search_query.lower() in self.last_actions[-1].get("text", "").lower():
+                        user_prompt += """
+NEXT STEP: You just typed the search query. Now you need to execute the search by either:
+1. Tapping on a search suggestion (preferred if visible)
+2. Pressing the enter/search key (use action "press_enter")
+3. Tapping the search button (if visible)
+
+DO NOT mark the task as complete until search results are visible.
+"""
+            
+            # Add information about the current iteration and previous actions
+            if hasattr(self, 'current_iteration') and hasattr(self, 'last_actions'):
+                user_prompt += f"\nCurrent Iteration: {self.current_iteration}/15\n"
+                
+                if self.last_actions:
+                    user_prompt += "Previous Actions:\n"
+                    for i, action in enumerate(self.last_actions[-3:]):  # Show last 3 actions
+                        user_prompt += f"Action {i+1}: {action.get('action', 'unknown')}"
+                        if action.get('action') == 'tap':
+                            user_prompt += f" at ({action.get('x_percent', 0):.1f}%, {action.get('y_percent', 0):.1f}%)"
+                        elif action.get('action') == 'type':
+                            user_prompt += f" text: \"{action.get('text', '')}\""
+                        elif action.get('action') in ['scroll', 'swipe']:
+                            user_prompt += f" direction: {action.get('direction', 'unknown')}"
+                        user_prompt += f" - {action.get('reasoning', 'No reasoning')[:50]}...\n"
+                    
+                    # If we've been repeating the same action, suggest trying a different approach
+                    if len(self.last_actions) >= 3:
+                        same_action = all(a.get('action') == self.last_actions[0].get('action') for a in self.last_actions[-3:])
+                        if same_action:
+                            user_prompt += "\nNOTE: The same action has been repeated multiple times without success. Consider trying a different approach or position.\n"
+                            
+                            # Add specific suggestions based on the repeated action
+                            if self.last_actions[0].get('action') == 'tap':
+                                user_prompt += """
+Suggestions for breaking the tap loop:
+1. Try tapping at different positions (e.g., if trying to tap a menu button in the top-right, try slightly different coordinates)
+2. Try scrolling to reveal more UI elements
+3. Try a different action like pressing back or going to the home screen
+4. If trying to tap a menu button, try different corners of the screen
+"""
+                            elif self.last_actions[0].get('action') == 'scroll':
+                                user_prompt += """
+Suggestions for breaking the scroll loop:
+1. Try tapping in the center of the screen
+2. Try scrolling in a different direction
+3. Try a different action like pressing back or going to the home screen
+"""
             
             user_prompt += "\nDetermine the NEXT SINGLE ACTION to take to progress toward completing the task."
             
@@ -573,7 +761,7 @@ Respond with a JSON object containing:
             
             # Check if we need to escape special characters
             escaped_text = text.replace("'", "\\'").replace('"', '\\"').replace(" ", "%s")
-            subprocess.run(["adb", "shell", f"input text '{escaped_text}'"], shell=True)
+            subprocess.run(["adb", "shell", "input", "text", escaped_text])
             
             # Check if we should press enter after typing
             if action.get("press_enter", False) or "search" in text.lower():
@@ -641,9 +829,37 @@ Respond with a JSON object containing:
             subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_APP_SWITCH"])
             return True
             
+        elif action_type == "press_enter":
+            print("⌨️ Pressing Enter key")
+            subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_ENTER"])
+            return True
+            
         else:
             print(f"❌ Unknown action type: {action_type}")
             return False
+    
+    async def handle_specific_task(self, task):
+        """Placeholder for specific task handling - always returns None to use general approach."""
+        return None
+    
+    async def verify_search_results(self, query, screen_context):
+        """Verify that search results for the given query are displayed."""
+        # Check if the query appears in the screen text
+        if query.lower() in screen_context["screen_text"].lower():
+            return True
+        
+        # Check if any UI elements contain the query
+        for elem in screen_context["ui_elements"]:
+            if query.lower() in elem.get("text", "").lower() or query.lower() in elem.get("content_desc", "").lower():
+                return True
+        
+        # Check for common search result indicators
+        search_indicators = ["results", "search", "found", "showing", "related"]
+        for indicator in search_indicators:
+            if indicator in screen_context["screen_text"].lower():
+                return True
+        
+        return False
     
     async def run_task(self, task):
         """Run a task on the Android device."""
@@ -673,13 +889,15 @@ Respond with a JSON object containing:
             else:
                 print(f"❌ Failed to launch {app_name}")
         
-        # Track repetitive actions
+        # Initialize tracking variables
+        self.last_actions = []
         last_action = None
         repetitive_count = 0
         
         # Main task execution loop
         for iteration in range(15):
-            print(f"\n📱 Iteration {iteration + 1}/15")
+            self.current_iteration = iteration + 1
+            print(f"\n📱 Iteration {self.current_iteration}/15")
             
             # Get screen context
             screen_context = await self.get_screen_context()
@@ -687,10 +905,34 @@ Respond with a JSON object containing:
             # Determine next action
             action_plan = await self.determine_action(task, screen_context)
             
+            # Store action for future reference
+            self.last_actions.append(action_plan)
+            if len(self.last_actions) > 5:  # Keep only the last 5 actions
+                self.last_actions.pop(0)
+            
             # Check if task is complete
             if action_plan.get("is_task_complete", False):
-                print(f"✅ Task completed: {task}")
-                return True
+                # For search tasks, verify that the search was actually executed
+                if "search" in task.lower():
+                    # Extract the search query from the task
+                    search_query = task.lower().split("search")[1].strip()
+                    if action_plan.get("action") == "type":
+                        print("⚠️ Search task requires executing the search, not just typing the query")
+                        action_plan["is_task_complete"] = False
+                    elif self.last_actions and self.last_actions[-1].get("action") == "type":
+                        # If the last action was typing and this action is not a tap or enter, it's not complete
+                        if action_plan.get("action") != "tap" and not action_plan.get("press_enter", False):
+                            print("⚠️ Search task requires tapping a result or pressing enter after typing")
+                            action_plan["is_task_complete"] = False
+                    
+                    # Verify search results are displayed
+                    if not await self.verify_search_results(search_query, screen_context):
+                        print(f"⚠️ Search results for '{search_query}' not yet displayed")
+                        action_plan["is_task_complete"] = False
+                
+                if action_plan.get("is_task_complete", False):
+                    print(f"✅ Task completed: {task}")
+                    return True
             
             # Check for repetitive actions
             action = action_plan.get("action", "")
