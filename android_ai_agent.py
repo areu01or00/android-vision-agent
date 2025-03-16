@@ -12,6 +12,23 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import xml.etree.ElementTree as ET
 import hashlib
+import requests
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from appium.options.android import UiAutomator2Options
+from appium.webdriver.common.appiumby import AppiumBy
+
+# Try to import Appium dependencies
+try:
+    from appium import webdriver
+    APPIUM_AVAILABLE = True
+    print("Appium Python client successfully imported.")
+except ImportError as e:
+    APPIUM_AVAILABLE = False
+    print(f"Appium Python client not installed. Some features will be limited.")
+    print(f"Error: {e}")
+    print("To install: pip install Appium-Python-Client")
 
 # Load environment variables
 load_dotenv()
@@ -24,6 +41,11 @@ class AndroidAgent:
         self.screenshot_dir = "screenshots"
         self.llm_provider = llm_provider
         self.ui_state_cache = {}
+        
+        # Initialize Appium if available
+        self.appium_driver = None
+        if APPIUM_AVAILABLE:
+            self._init_appium()
         
         # Initialize the LLM client based on provider
         if llm_provider == "openai":
@@ -43,6 +65,135 @@ class AndroidAgent:
         # Create necessary directories
         os.makedirs(self.screenshot_dir, exist_ok=True)
         os.makedirs("hierarchies", exist_ok=True)
+    
+    def _connect_appium_2(self):
+        """Connect to Appium 2.0 server with proper options."""
+        try:
+            print("Connecting to Appium 2.0...")
+            
+            # Set up options using the new format for Appium 2.0
+            options = UiAutomator2Options()
+            options.platform_name = 'Android'
+            options.automation_name = 'UiAutomator2'
+            
+            # Add capabilities using set_capability instead of direct assignment
+            options.set_capability('noReset', True)
+            
+            # Skip settings that require WRITE_SECURE_SETTINGS permission
+            options.set_capability('skipServerInstallation', True)
+            options.set_capability('skipDeviceInitialization', True)
+            options.set_capability('skipUnlock', True)
+            options.set_capability('ignoreHiddenApiPolicyError', True)
+            options.set_capability('autoGrantPermissions', True)
+            
+            # Get device UDID
+            try:
+                devices_output = subprocess.check_output(["adb", "devices"]).decode('utf-8')
+                device_lines = devices_output.strip().split('\n')[1:]
+                if device_lines:
+                    device_info = device_lines[0].split('\t')
+                    if len(device_info) > 0 and device_info[0]:
+                        options.set_capability('udid', device_info[0])
+                        print(f"Using device UDID: {device_info[0]}")
+            except Exception as e:
+                print(f"Error getting device UDID: {e}")
+            
+            # Connect to Appium server
+            self.appium_driver = webdriver.Remote('http://localhost:4723', options=options)
+            
+            # Get screen dimensions
+            window_size = self.appium_driver.get_window_size()
+            self.screen_width = window_size['width']
+            self.screen_height = window_size['height']
+            
+            print(f"✅ Connected to Appium 2.0. Screen size: {self.screen_width}x{self.screen_height}")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to connect to Appium 2.0: {e}")
+            return False
+    
+    def _connect_appium_1(self):
+        """Connect to Appium 1.x server with legacy capabilities."""
+        try:
+            print("Connecting to Appium 1.x...")
+            
+            # Set up capabilities for Appium 1.x
+            capabilities = {
+                'platformName': 'Android',
+                'automationName': 'UiAutomator2',
+                'noReset': True,
+                'skipServerInstallation': True,
+                'skipDeviceInitialization': True,
+                'skipUnlock': True,
+                'ignoreHiddenApiPolicyError': True,
+                'autoGrantPermissions': True
+            }
+            
+            # Get device UDID
+            try:
+                devices_output = subprocess.check_output(["adb", "devices"]).decode('utf-8')
+                device_lines = devices_output.strip().split('\n')[1:]
+                if device_lines:
+                    device_info = device_lines[0].split('\t')
+                    if len(device_info) > 0 and device_info[0]:
+                        capabilities['udid'] = device_info[0]
+                        print(f"Using device UDID: {device_info[0]}")
+            except Exception as e:
+                print(f"Error getting device UDID: {e}")
+            
+            # Connect to Appium server
+            self.appium_driver = webdriver.Remote('http://localhost:4723/wd/hub', desired_capabilities=capabilities)
+            
+            # Get screen dimensions
+            window_size = self.appium_driver.get_window_size()
+            self.screen_width = window_size['width']
+            self.screen_height = window_size['height']
+            
+            print(f"✅ Connected to Appium 1.x. Screen size: {self.screen_width}x{self.screen_height}")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to connect to Appium 1.x: {e}")
+            return False
+    
+    def _init_appium(self):
+        """Initialize Appium configuration and try to connect."""
+        if not APPIUM_AVAILABLE:
+            print("Appium Python client not available. Skipping Appium initialization.")
+            return False
+        
+        try:
+            print("Initializing Appium...")
+            
+            # Try Appium 2.0 connection first
+            if self._connect_appium_2():
+                # Detect Android version
+                try:
+                    android_version = self.appium_driver.capabilities['platformVersion']
+                    print(f"Detected Android version: {android_version}")
+                except Exception as e:
+                    print(f"Error detecting Android version: {e}")
+                return True
+            
+            # Fall back to Appium 1.x connection
+            print("Trying Appium 1.x connection...")
+            if self._connect_appium_1():
+                # Detect Android version
+                try:
+                    android_version = self.appium_driver.capabilities['platformVersion']
+                    print(f"Detected Android version: {android_version}")
+                except Exception as e:
+                    print(f"Error detecting Android version: {e}")
+                return True
+            
+            print("❌ Failed to connect to Appium server.")
+            print("Make sure Appium server is running (appium) and device is connected.")
+            self.appium_driver = None
+            return False
+            
+        except Exception as e:
+            print(f"Error initializing Appium: {e}")
+            self.appium_driver = None
+            return False
     
     def _encode_image(self, image_path):
         """Encode image to base64 with resizing for API efficiency."""
@@ -165,8 +316,63 @@ class AndroidAgent:
             print(f"Error getting screen dimensions: {e}")
             return 1080, 1920  # Default fallback values
     
+    async def get_appium_ui_elements(self):
+        """Extract UI elements from Appium page source."""
+        if not hasattr(self, 'appium_driver') or not self.appium_driver:
+            return []
+        
+        try:
+            elements = []
+            
+            # Get screen dimensions for percentage calculations
+            width, height = await self._get_screen_dimensions()
+            
+            # Get all elements with attributes we care about
+            appium_elements = self.appium_driver.find_elements(AppiumBy.XPATH, 
+                "//*[@text or @content-desc or @resource-id or @clickable='true' or contains(@class, 'EditText')]")
+            
+            for elem in appium_elements:
+                try:
+                    # Extract element attributes
+                    element = {
+                        "text": elem.get_attribute("text") or "",
+                        "content_desc": elem.get_attribute("content-desc") or "",
+                        "class": elem.get_attribute("class") or "",
+                        "resource_id": elem.get_attribute("resource-id") or "",
+                        "clickable": elem.get_attribute("clickable") == "true",
+                        "source": "appium"
+                    }
+                    
+                    # Get element location and size
+                    rect = elem.rect
+                    if rect:
+                        # Calculate center coordinates
+                        element["center_x"] = rect["x"] + rect["width"] // 2
+                        element["center_y"] = rect["y"] + rect["height"] // 2
+                        
+                        # Add percentage coordinates
+                        element["center_x_percent"] = round((element["center_x"] / width) * 100, 1)
+                        element["center_y_percent"] = round((element["center_y"] / height) * 100, 1)
+                        
+                        # Add bounds in the same format as XML for consistency
+                        element["bounds"] = f"[{rect['x']},{rect['y']}][{rect['x'] + rect['width']},{rect['y'] + rect['height']}]"
+                    
+                    # Only add elements with text, content description, or interactivity
+                    if (element["text"] or element["content_desc"] or 
+                        element["clickable"] or "edit" in element["class"].lower()):
+                        elements.append(element)
+                except Exception as e:
+                    # Skip elements that cause errors
+                    print(f"Error processing Appium element: {e}")
+                    continue
+                
+            return elements
+        except Exception as e:
+            print(f"Error extracting Appium UI elements: {e}")
+            return []
+    
     async def get_screen_context(self):
-        """Get screen context using XML-first approach with screenshot fallback."""
+        """Get screen context using both Appium and XML data for comprehensive UI understanding."""
         try:
             # Initialize context
             context = {"app_info": {}, "ui_elements": [], "screen_text": ""}
@@ -174,20 +380,26 @@ class AndroidAgent:
             # Get screen dimensions
             width, height = await self._get_screen_dimensions()
             
-            # Get XML hierarchy
+            # Get Appium data
+            appium_elements = await self.get_appium_ui_elements()
+            
+            # Get XML hierarchy (always do this as a complementary data source)
             xml_content = await self.get_xml_hierarchy()
+            xml_elements = []
+            
             if xml_content:
                 # Parse XML
                 root = ET.fromstring(xml_content)
                 
-                # Extract app info
-                context["app_info"] = {
-                    "package": root.get('package', 'Unknown'),
-                    "activity": root.get('activity', 'Unknown'),
-                    "app_name": root.get('package', 'Unknown').split('.')[-1].capitalize()
-                }
+                # Extract app info if not already set by Appium
+                if not context["app_info"]:
+                    context["app_info"] = {
+                        "package": root.get('package', 'Unknown'),
+                        "activity": root.get('activity', 'Unknown'),
+                        "app_name": root.get('package', 'Unknown').split('.')[-1].capitalize()
+                    }
                 
-                # Extract UI elements
+                # Extract UI elements from XML
                 for node in root.findall('.//*'):
                     element = {
                         "text": node.get('text', ''),
@@ -195,7 +407,8 @@ class AndroidAgent:
                         "class": node.get('class', ''),
                         "resource_id": node.get('resource-id', ''),
                         "clickable": node.get('clickable', 'false') == 'true',
-                        "bounds": node.get('bounds', '')
+                        "bounds": node.get('bounds', ''),
+                        "source": "xml"
                     }
                     
                     # Parse bounds if available
@@ -213,21 +426,36 @@ class AndroidAgent:
                     # Only add elements with text, content description, or interactivity
                     if (element["text"] or element["content_desc"] or 
                         element["clickable"] or "edit" in element["class"].lower()):
-                        context["ui_elements"].append(element)
-                
-                # Extract screen text
-                text_elements = []
-                for node in root.findall('.//*'):
-                    text = node.get('text', '').strip()
-                    content_desc = node.get('content-desc', '').strip()
-                    if text:
-                        text_elements.append(text)
-                    if content_desc:
-                        text_elements.append(content_desc)
-                context["screen_text"] = " ".join(text_elements)
+                        xml_elements.append(element)
             
-            # If XML didn't provide enough info, use screenshot
-            if not context["ui_elements"]:
+            # Merge Appium and XML elements, prioritizing Appium data for duplicates
+            merged_elements = {}
+            
+            # First add XML elements to the dictionary using a composite key
+            for elem in xml_elements:
+                key = f"{elem.get('text', '')}-{elem.get('content_desc', '')}-{elem.get('resource_id', '')}"
+                merged_elements[key] = elem
+            
+            # Then add/override with Appium elements
+            for elem in appium_elements:
+                key = f"{elem.get('text', '')}-{elem.get('content_desc', '')}-{elem.get('resource_id', '')}"
+                merged_elements[key] = elem
+            
+            # Convert back to list
+            context["ui_elements"] = list(merged_elements.values())
+            
+            # Extract screen text from all elements
+            text_elements = []
+            for elem in context["ui_elements"]:
+                if elem.get("text"):
+                    text_elements.append(elem.get("text"))
+                if elem.get("content_desc"):
+                    text_elements.append(elem.get("content_desc"))
+            
+            context["screen_text"] = " ".join(text_elements)
+            
+            # If we still don't have enough info, use screenshot analysis
+            if not context["ui_elements"] or not context["screen_text"]:
                 screenshot_path = await self.capture_screen()
                 if screenshot_path:
                     # Use vision model to extract text
@@ -365,15 +593,11 @@ class AndroidAgent:
 Determine the best next action based on the task and screen context.
 
 CRITICAL INSTRUCTIONS:
-- YOU MUST TAKE A CONCRETE ACTION AT EACH STEP - DO NOT JUST ANALYZE
-- ALWAYS choose one of the available actions (tap, type, scroll, etc.)
-- NEVER skip taking an action - the user is waiting for you to control their device
-- For multi-step tasks, execute ONE STEP at a time, then wait for the next iteration
-- ALWAYS include x_percent and y_percent for tap actions
-- ONLY mark a task as complete when you have ACTUALLY COMPLETED the entire task
-- After typing a search query, you MUST tap on a search result or press enter to execute the search
-- VERIFY that your action had the intended effect before moving to the next step
-- For search tasks, the task is only complete after you've tapped on a search result or pressed enter AND the search results are displayed
+- ALWAYS use element-based interactions instead of coordinates
+- For tap actions, ALWAYS include element_text, element_content_desc, or element_resource_id
+- NEVER rely solely on x_percent and y_percent for interactions
+- If you can't find an element by exact text, try partial text matching
+- For scrolling, specify the text you want to scroll to when possible
 
 IMPORTANT GUIDELINES:
 1. Break down complex tasks into individual steps and determine the NEXT SINGLE ACTION to take.
@@ -388,9 +612,14 @@ IMPORTANT GUIDELINES:
 10. If you're unsure about an element's position, try to find similar elements or use common UI patterns.
 11. After typing text, look for a search button, keyboard enter key, or suggestion to tap to complete the search.
 12. If you encounter an error or unexpected screen, try pressing back or going home and starting again.
-13. For search tasks, mark the task as complete only after the search results for your query are visible.
-14. For navigation tasks, mark the task as complete only after the destination is reached and verified.
-15. For input tasks, mark the task as complete only after the input is submitted and confirmed.
+13. For search tasks, mark the task as complete only after you've tapped on a search result or pressed enter AND the search results are displayed
+
+ELEMENT-BASED INTERACTIONS:
+- When tapping on a UI element, ALWAYS include the element's text, content_desc, or resource_id if available
+- For tap actions, include element_text, element_content_desc, or element_resource_id in your response
+- This helps the system find the exact element to tap, even if its position changes
+- Example: {"action": "tap", "element_text": "Gmail", "x_percent": 50, "y_percent": 50}
+- The system will first try to find and tap the element by its properties before falling back to coordinates
 
 SEARCH TASK COMPLETION CHECKLIST:
 1. Open the app (e.g., Chrome, YouTube)
@@ -447,25 +676,10 @@ ERROR RECOVERY STRATEGIES:
 - If you can't find a UI element: try scrolling in the most likely direction
 - If completely stuck: go home and restart the task from the beginning
 
-EXAMPLE ACTIONS FOR COMMON TASKS:
-1. Opening Chrome incognito tab:
-   - Action 1: tap at (95%, 8%) to open Chrome menu
-   - Action 2: tap at (70%, 20%) to select "New Incognito tab"
-
-2. Searching in Chrome:
-   - Action 1: tap at (50%, 10%) to focus address bar
-   - Action 2: type "search query"
-   - Action 3: tap at (50%, 15%) to select suggestion OR press enter
-   - Action 4: verify search results are displayed (is_task_complete = true)
-
-3. Composing email in Gmail:
-   - Action 1: tap at (90%, 90%) to tap compose button
-   - Action 2: tap at (50%, 30%) to focus recipient field
-   - Action 3: type "recipient@email.com"
-
 Respond with a JSON object containing:
 - "action": One of ["tap", "type", "scroll", "swipe", "go_home", "press_back", "wait", "press_enter"]
 - "x_percent", "y_percent": For tap actions (0-100)
+- "element_text", "element_content_desc", "element_resource_id": For tap actions, to help find the element
 - "text": For type actions
 - "direction": For scroll/swipe actions
 - "wait_time": For wait actions
@@ -489,13 +703,17 @@ Respond with a JSON object containing:
                         user_prompt += f"Text: \"{elem.get('text')}\" "
                     if elem.get("content_desc"):
                         user_prompt += f"Desc: \"{elem.get('content_desc')}\" "
+                    if elem.get("resource_id"):
+                        user_prompt += f"ID: \"{elem.get('resource_id')}\" "
                     user_prompt += f"Class: {elem.get('class')} "
                     user_prompt += f"Clickable: {elem.get('clickable')}"
                     if "center_x_percent" in elem and "center_y_percent" in elem:
                         user_prompt += f" Position: ({elem['center_x_percent']}%, {elem['center_y_percent']}%)"
                     elif "center_x" in elem and "center_y" in elem:
                         user_prompt += f" Position: ({elem['center_x']}, {elem['center_y']})"
-                    user_prompt += "\n"
+                    if "source" in elem:
+                        user_prompt += f" Source: {elem['source']}"
+                    print()
             
             # Add screen text
             if screen_context["screen_text"]:
@@ -552,7 +770,7 @@ The task is only complete when search results for "{search_query}" are visible o
 """
                     
                     # Check if we just typed the query and need to execute the search
-                    if self.last_actions and self.last_actions[-1].get("action") == "type" and search_query.lower() in self.last_actions[-1].get("text", "").lower():
+                    if hasattr(self, 'last_actions') and self.last_actions and self.last_actions[-1].get("action") == "type" and search_query.lower() in self.last_actions[-1].get("text", "").lower():
                         user_prompt += """
 NEXT STEP: You just typed the search query. Now you need to execute the search by either:
 1. Tapping on a search suggestion (preferred if visible)
@@ -572,6 +790,12 @@ DO NOT mark the task as complete until search results are visible.
                         user_prompt += f"Action {i+1}: {action.get('action', 'unknown')}"
                         if action.get('action') == 'tap':
                             user_prompt += f" at ({action.get('x_percent', 0):.1f}%, {action.get('y_percent', 0):.1f}%)"
+                            if action.get('element_text'):
+                                user_prompt += f" on element with text: \"{action.get('element_text')}\""
+                            elif action.get('element_content_desc'):
+                                user_prompt += f" on element with desc: \"{action.get('element_content_desc')}\""
+                            elif action.get('element_resource_id'):
+                                user_prompt += f" on element with id: \"{action.get('element_resource_id')}\""
                         elif action.get('action') == 'type':
                             user_prompt += f" text: \"{action.get('text', '')}\""
                         elif action.get('action') in ['scroll', 'swipe']:
@@ -621,11 +845,11 @@ Suggestions for breaking the scroll loop:
             response_text = response.choices[0].message.content
             
             # Debug: Print raw response
-            print(f"Debug - Raw response: {response_text[:100]}...")
-            
-            # Parse response
+            print(f"Raw response: {response_text[:100]}...")  # Print first 100 chars
+
             try:
                 action_plan = json.loads(response_text)
+                print("Successfully parsed JSON directly")
             except json.JSONDecodeError:
                 # Try to extract JSON from text
                 json_match = re.search(r'(\{.*\})', response_text, re.DOTALL)
@@ -655,6 +879,12 @@ Suggestions for breaking the scroll loop:
             print(f"Action: {action_plan.get('action', 'unknown')}")
             if "x_percent" in action_plan and "y_percent" in action_plan:
                 print(f"Position: ({action_plan.get('x_percent'):.1f}%, {action_plan.get('y_percent'):.1f}%)")
+            if action_plan.get("element_text"):
+                print(f"Element text: {action_plan.get('element_text')}")
+            if action_plan.get("element_content_desc"):
+                print(f"Element content-desc: {action_plan.get('element_content_desc')}")
+            if action_plan.get("element_resource_id"):
+                print(f"Element resource-id: {action_plan.get('element_resource_id')}")
             if "text" in action_plan and action_plan["text"]:
                 print(f"Text: {action_plan.get('text')}")
             print(f"Reasoning: {action_plan.get('reasoning', 'No reasoning provided')}")
@@ -710,6 +940,19 @@ Suggestions for breaking the scroll loop:
             except ValueError:
                 action_plan["y_percent"] = 50
         
+        # Extract element information
+        element_text_match = re.search(r'element_text["\s:]+["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if element_text_match:
+            action_plan["element_text"] = element_text_match.group(1)
+        
+        element_desc_match = re.search(r'element_content_desc["\s:]+["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if element_desc_match:
+            action_plan["element_content_desc"] = element_desc_match.group(1)
+        
+        element_id_match = re.search(r'element_resource_id["\s:]+["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if element_id_match:
+            action_plan["element_resource_id"] = element_id_match.group(1)
+        
         # Extract text for typing
         text_match = re.search(r'text["\s:]+["\']([^"\']+)["\']', text, re.IGNORECASE)
         if text_match:
@@ -736,107 +979,165 @@ Suggestions for breaking the scroll loop:
         return action_plan
     
     async def execute_action(self, action):
-        """Execute the specified action on the device."""
+        """Execute the specified action on the device using element-based interactions."""
         action_type = action.get("action", "").lower()
         
-        if action_type == "tap":
-            # Ensure percentages are within valid range (0-100)
-            x_percent = min(max(float(action.get("x_percent", 50)), 0), 100)
-            y_percent = min(max(float(action.get("y_percent", 50)), 0), 100)
+        try:
+            # Handle navigation actions with ADB (these are fine to keep)
+            if action_type == "go_home" or action_type == "home":
+                print("🏠 Going to home screen")
+                subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_HOME"])
+                return True
             
-            # Get screen dimensions
-            dimensions = subprocess.check_output(["adb", "shell", "wm", "size"]).decode('utf-8').strip()
-            width, height = map(int, dimensions.split(': ')[1].split('x'))
+            elif action_type == "press_back" or action_type == "back":
+                print("⬅️ Pressing back button")
+                subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_BACK"])
+                return True
             
-            x = int(width * x_percent / 100)
-            y = int(height * y_percent / 100)
-            
-            print(f"📱 Tapping at coordinates: {x}, {y} ({x_percent:.1f}%, {y_percent:.1f}%)")
-            subprocess.run(["adb", "shell", "input", "tap", str(x), str(y)])
-            return True
-            
-        elif action_type == "type":
-            text = action.get("text", "")
-            print(f"⌨️ Typing text: \"{text}\"")
-            
-            # Check if we need to escape special characters
-            escaped_text = text.replace("'", "\\'").replace('"', '\\"').replace(" ", "%s")
-            subprocess.run(["adb", "shell", "input", "text", escaped_text])
-            
-            # Check if we should press enter after typing
-            if action.get("press_enter", False) or "search" in text.lower():
-                print("Pressing Enter key")
-                await asyncio.sleep(0.5)
+            elif action_type == "press_enter":
+                print("⌨️ Pressing Enter key")
                 subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_ENTER"])
+                return True
             
-            return True
+            # For tap actions, ONLY use element-based interactions
+            elif action_type == "tap":
+                element = self.find_element_safely(action)
+                if element:
+                    print(f"📱 Tapping on element: {action.get('element_text') or action.get('element_content_desc') or action.get('element_resource_id')}")
+                    element.click()
+                    return True
+                else:
+                    print("❌ Could not find element to tap")
+                    return False
             
-        elif action_type == "scroll":
-            direction = action.get("direction", "down").lower()
+            # For typing, always find the input field first
+            elif action_type == "type":
+                text = action.get("text", "")
+                print(f"⌨️ Typing text: \"{text}\"")
+                
+                # Find an input field
+                input_field = None
+                try:
+                    # Try to find an editable field that's focused
+                    input_field = self.appium_driver.find_element(AppiumBy.XPATH, 
+                        "//*[@focused='true' and (contains(@class, 'EditText') or @clickable='true')]")
+                except:
+                    try:
+                        # If no focused field, try to find any editable field
+                        input_field = self.appium_driver.find_element(AppiumBy.XPATH, 
+                            "//*[contains(@class, 'EditText')]")
+                    except:
+                        print("❌ Could not find input field")
+                        return False
+                
+                input_field.clear()
+                input_field.send_keys(text)
+                
+                # Check if we should press enter after typing
+                if action.get("press_enter", False):
+                    await asyncio.sleep(0.5)
+                    self.appium_driver.press_keycode(66)  # KEYCODE_ENTER
+                
+                return True
             
-            print(f"📜 Scrolling {direction}")
-            if direction == "down":
-                subprocess.run(["adb", "shell", "input", "swipe", "500", "1500", "500", "500", "300"])
-            elif direction == "up":
-                subprocess.run(["adb", "shell", "input", "swipe", "500", "500", "500", "1500", "300"])
-            elif direction == "left":
-                subprocess.run(["adb", "shell", "input", "swipe", "100", "500", "900", "500", "300"])
-            elif direction == "right":
-                subprocess.run(["adb", "shell", "input", "swipe", "900", "500", "100", "500", "300"])
-            return True
+            # For scrolling, use UiScrollable
+            elif action_type == "scroll":
+                direction = action.get("direction", "down").lower()
+                
+                if action.get("element_text"):
+                    # Scroll until text is visible
+                    try:
+                        self.appium_driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 
+                            f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().text("{action.get("element_text")}"))')
+                        print(f"📜 Scrolled to text: {action.get('element_text')}")
+                        return True
+                    except Exception as e:
+                        print(f"Error scrolling to text: {e}")
+                
+                # If no specific element, scroll in the direction
+                try:
+                    # Find a scrollable container
+                    scrollable = self.appium_driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, 
+                        'new UiSelector().scrollable(true)')
+                    
+                    # Get dimensions
+                    size = scrollable.size
+                    
+                    # Calculate scroll coordinates
+                    start_x = size['width'] // 2
+                    start_y = size['height'] * 3 // 4 if direction == "down" else size['height'] // 4
+                    end_x = start_x
+                    end_y = size['height'] // 4 if direction == "down" else size['height'] * 3 // 4
+                    
+                    # Perform scroll
+                    self.appium_driver.swipe(start_x, start_y, end_x, end_y, 300)
+                    print(f"📜 Scrolled {direction}")
+                    return True
+                except Exception as e:
+                    print(f"Error scrolling: {e}")
+                    return False
             
-        elif action_type == "swipe":
-            # Ensure percentages are within valid range (0-100)
-            start_x = min(max(float(action.get("start_x_percent", 50)), 0), 100)
-            start_y = min(max(float(action.get("start_y_percent", 50)), 0), 100)
-            end_x = min(max(float(action.get("end_x_percent", 50)), 0), 100)
-            end_y = min(max(float(action.get("end_y_percent", 50)), 0), 100)
+            elif action_type == "wait":
+                wait_time = action.get("wait_time", 1)
+                print(f"⏱️ Waiting for {wait_time} seconds")
+                await asyncio.sleep(wait_time)
+                return True
             
-            # Get screen dimensions
-            dimensions = subprocess.check_output(["adb", "shell", "wm", "size"]).decode('utf-8').strip()
-            width, height = map(int, dimensions.split(': ')[1].split('x'))
+            else:
+                print(f"❌ Unknown action type: {action_type}")
+                return False
             
-            # Convert percentages to actual coordinates
-            start_x_px = int(width * start_x / 100)
-            start_y_px = int(height * start_y / 100)
-            end_x_px = int(width * end_x / 100)
-            end_y_px = int(height * end_y / 100)
-            
-            print(f"🔄 Swiping from ({start_x:.1f}%, {start_y:.1f}%) to ({end_x:.1f}%, {end_y:.1f}%)")
-            subprocess.run(["adb", "shell", "input", "swipe", 
-                           str(start_x_px), str(start_y_px), 
-                           str(end_x_px), str(end_y_px), "300"])
-            return True
-            
-        elif action_type == "wait":
-            wait_time = action.get("wait_time", 1)
-            print(f"⏱️ Waiting for {wait_time} seconds")
-            await asyncio.sleep(wait_time)
-            return True
-            
-        elif action_type == "go_home" or action_type == "home":
-            print("🏠 Going to home screen")
-            subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_HOME"])
-            return True
-            
-        elif action_type == "press_back" or action_type == "back":
-            print("⬅️ Pressing back button")
-            subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_BACK"])
-            return True
-            
-        elif action_type == "recent_apps" or action_type == "recents":
-            print("🔄 Opening recent apps")
-            subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_APP_SWITCH"])
-            return True
-            
-        elif action_type == "press_enter":
-            print("⌨️ Pressing Enter key")
-            subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_ENTER"])
-            return True
-            
-        else:
-            print(f"❌ Unknown action type: {action_type}")
+        except Exception as e:
+            print(f"Error executing action: {e}")
             return False
+    
+    def find_element_safely(self, action):
+        """Find an element using multiple strategies."""
+        try:
+            # Try by content-desc (accessibility ID)
+            if action.get("element_content_desc"):
+                wait = WebDriverWait(self.appium_driver, 10)
+                element = wait.until(EC.presence_of_element_located(
+                    (AppiumBy.ACCESSIBILITY_ID, action.get("element_content_desc"))
+                ))
+                return element
+            
+            # Try by text
+            elif action.get("element_text"):
+                wait = WebDriverWait(self.appium_driver, 10)
+                element = wait.until(EC.presence_of_element_located(
+                    (AppiumBy.XPATH, f"//*[@text='{action.get('element_text')}']")
+                ))
+                return element
+            
+            # Try by resource ID
+            elif action.get("element_resource_id"):
+                wait = WebDriverWait(self.appium_driver, 10)
+                element = wait.until(EC.presence_of_element_located(
+                    (AppiumBy.ID, action.get("element_resource_id"))
+                ))
+                return element
+            
+            # Try by class name + text
+            elif action.get("element_class") and action.get("element_text"):
+                wait = WebDriverWait(self.appium_driver, 10)
+                element = wait.until(EC.presence_of_element_located(
+                    (AppiumBy.XPATH, f"//{action.get('element_class')}[@text='{action.get('element_text')}']")
+                ))
+                return element
+            
+            # Try by partial text match
+            elif action.get("element_text"):
+                wait = WebDriverWait(self.appium_driver, 10)
+                element = wait.until(EC.presence_of_element_located(
+                    (AppiumBy.XPATH, f"//*[contains(@text, '{action.get('element_text')}')]")
+                ))
+                return element
+            
+            return None
+        except Exception as e:
+            print(f"Error finding element: {e}")
+            return None
     
     async def handle_specific_task(self, task):
         """Placeholder for specific task handling - always returns None to use general approach."""
@@ -971,6 +1272,14 @@ Suggestions for breaking the scroll loop:
         print("Type 'exit' to end the session")
         print("Type 'help' for commands")
         
+        # Show Appium status
+        if hasattr(self, 'appium_driver') and self.appium_driver:
+            print("✅ Appium is connected and ready")
+            print(f"   Screen size: {getattr(self, 'screen_width', 'unknown')}x{getattr(self, 'screen_height', 'unknown')}")
+        else:
+            print("⚠️ Appium is not connected. Some features will be limited.")
+            print("   You can use 'connect-appium' to try connecting.")
+        
         # Start scrcpy
         await self.start_scrcpy()
         
@@ -992,14 +1301,33 @@ Suggestions for breaking the scroll loop:
                 print("  home - Go to home screen")
                 print("  back - Press back button")
                 
+                # Show Appium-specific commands if available
+                if APPIUM_AVAILABLE:
+                    print("\nAppium Commands:")
+                    print("  appium-status - Check Appium connection status")
+                    print("  connect-appium - Try to connect to Appium server")
+                    print("  appium-elements - List all UI elements from Appium")
+            
             elif user_input.lower() == 'context':
                 context = await self.get_screen_context()
                 print("\n=== SCREEN ANALYSIS ===")
                 print(f"App: {context['app_info'].get('app_name', 'Unknown')}")
+                print(f"Package: {context['app_info'].get('package', 'Unknown')}")
                 print("\n--- UI ELEMENTS ---")
                 for i, element in enumerate(context.get('ui_elements', [])[:10]):
-                    print(f"{i+1}. {element.get('text', 'No text')} - {element.get('class', 'unknown')}")
-                
+                    print(f"{i+1}. ", end="")
+                    if element.get("text"):
+                        print(f"Text: '{element.get('text')}' ", end="")
+                    if element.get("content_desc"):
+                        print(f"Desc: '{element.get('content_desc')}' ", end="")
+                    if element.get("resource_id"):
+                        print(f"ID: '{element.get('resource_id')}' ", end="")
+                    if "center_x_percent" in element and "center_y_percent" in element:
+                        print(f"Position: ({element['center_x_percent']}%, {element['center_y_percent']}%)", end="")
+                    if "source" in element:
+                        print(f" Source: {element['source']}", end="")
+                    print()
+            
             elif user_input.lower() == 'screenshot':
                 screenshot_path = await self.capture_screen()
                 print(f"Screenshot saved to {screenshot_path}")
@@ -1014,6 +1342,88 @@ Suggestions for breaking the scroll loop:
             elif user_input.lower() == 'back':
                 await self.execute_action({"action": "press_back"})
                 
+            elif user_input.lower() == 'appium-status' and APPIUM_AVAILABLE:
+                if hasattr(self, 'appium_driver') and self.appium_driver:
+                    try:
+                        # Check if driver is still active
+                        current_activity = self.appium_driver.current_activity
+                        print(f"✅ Appium is connected and active")
+                        print(f"   Current app: {self.appium_driver.current_package}")
+                        print(f"   Current activity: {current_activity}")
+                    except Exception as e:
+                        print(f"❌ Appium connection is broken: {e}")
+                        print("   Use 'connect-appium' to reconnect")
+                else:
+                    print("❌ Appium is not connected")
+                    print("   Use 'connect-appium' to connect")
+                
+            elif user_input.lower() == 'connect-appium' and APPIUM_AVAILABLE:
+                print("Attempting to connect to Appium...")
+                # Close existing connection if any
+                if hasattr(self, 'appium_driver') and self.appium_driver:
+                    try:
+                        self.appium_driver.quit()
+                        print("Closed existing Appium connection.")
+                    except Exception as e:
+                        print(f"Error closing existing connection: {e}")
+                    self.appium_driver = None
+                
+                # Check if Appium server is running
+                try:
+                    # Try both Appium 1.x and 2.0 status endpoints
+                    try:
+                        response = requests.get('http://localhost:4723/status', timeout=5)
+                    except:
+                        response = requests.get('http://localhost:4723/wd/hub/status', timeout=5)
+                        
+                    if response.status_code == 200:
+                        print("✅ Appium server is running.")
+                    else:
+                        print(f"⚠️ Appium server returned status code {response.status_code}.")
+                except Exception as e:
+                    print(f"❌ Could not connect to Appium server: {e}")
+                    print("   Make sure it's running with: appium")
+                    return
+                
+                # Initialize Appium
+                success = self._init_appium()
+                
+                if success:
+                    print("✅ Successfully connected to Appium")
+                    # Try to get current activity as a test
+                    try:
+                        current_package = self.appium_driver.current_package
+                        current_activity = self.appium_driver.current_activity
+                        print(f"   Current app: {current_package}")
+                        print(f"   Current activity: {current_activity}")
+                    except Exception as e:
+                        print(f"   Note: Could not get current activity: {e}")
+                else:
+                    print("❌ Failed to connect to Appium")
+                    print("   Make sure Appium server is running and device is connected.")
+                    print("   Start Appium with: appium")
+            
+            elif user_input.lower() == 'appium-elements' and APPIUM_AVAILABLE:
+                if hasattr(self, 'appium_driver') and self.appium_driver:
+                    elements = await self.get_appium_ui_elements()
+                    print(f"\nFound {len(elements)} UI elements from Appium:")
+                    for i, element in enumerate(elements[:15]):  # Limit to 15 elements
+                        print(f"{i+1}. ", end="")
+                        if element.get("text"):
+                            print(f"Text: '{element.get('text')}' ", end="")
+                        if element.get("content_desc"):
+                            print(f"Desc: '{element.get('content_desc')}' ", end="")
+                        if element.get("resource_id"):
+                            print(f"ID: '{element.get('resource_id')}' ", end="")
+                        if "center_x_percent" in element and "center_y_percent" in element:
+                            print(f"Position: ({element['center_x_percent']}%, {element['center_y_percent']}%)", end="")
+                        if "source" in element:
+                            print(f" Source: {element['source']}", end="")
+                        print()
+                else:
+                    print("❌ Appium is not connected")
+                    print("   Use 'connect-appium' to connect")
+            
             else:
                 result = await self.run_task(user_input)
                 if not result:
